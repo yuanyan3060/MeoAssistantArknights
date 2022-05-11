@@ -16,20 +16,21 @@ using namespace asst;
 
 asst::ProcessTask::ProcessTask(const AbstractTask& abs, std::vector<std::string> tasks_name)
     : AbstractTask(abs),
-    m_cur_tasks_name(std::move(tasks_name))
+    m_raw_tasks_name(std::move(tasks_name))
 {
     m_basic_info_cache = json::value();
 }
 
 asst::ProcessTask::ProcessTask(AbstractTask&& abs, std::vector<std::string> tasks_name) noexcept
     : AbstractTask(std::move(abs)),
-    m_cur_tasks_name(std::move(tasks_name))
+    m_raw_tasks_name(std::move(tasks_name))
 {
     m_basic_info_cache = json::value();
 }
 
 bool asst::ProcessTask::run()
 {
+    m_cur_tasks_name = m_raw_tasks_name;
     for (m_cur_retry = 0; m_cur_retry <= m_retry_times; ++m_cur_retry) {
         if (_run()) {
             return true;
@@ -50,19 +51,19 @@ bool asst::ProcessTask::run()
 
 asst::ProcessTask& asst::ProcessTask::set_tasks(std::vector<std::string> tasks_name) noexcept
 {
-    m_cur_tasks_name = std::move(tasks_name);
+    m_raw_tasks_name = std::move(tasks_name);
     return *this;
 }
 
 ProcessTask& asst::ProcessTask::set_times_limit(std::string name, int limit)
 {
-    m_times_limit.emplace(std::move(name), limit);
+    m_times_limit[std::move(name)] = limit;
     return *this;
 }
 
 ProcessTask& asst::ProcessTask::set_rear_delay(std::string name, int delay)
 {
-    m_rear_delay.emplace(std::move(name), delay);
+    m_rear_delay[std::move(name)] = delay;
     return *this;
 }
 
@@ -77,15 +78,24 @@ bool ProcessTask::_run()
         }
         json::value info = basic_info();
         info["details"] = json::object{
-            {"to_be_recognized", json::array(m_cur_tasks_name)}
+            {"to_be_recognized", json::array(m_cur_tasks_name)},
+            {"cur_retry", m_cur_retry},
+            {"retry_times", m_retry_times}
         };
         Log.info(info.to_string());
 
         Rect rect;
+        std::shared_ptr<TaskInfo> cur_task_ptr = nullptr;
+
+        auto front_task_ptr = Task.get(m_cur_tasks_name.front());
+        // 可能有配置错误，导致不存在对应的任务
+        if (front_task_ptr == nullptr) {
+            Log.error("Invalid task", m_cur_tasks_name.front());
+            return false;
+        }
         // 如果第一个任务是JustReturn的，那就没必要再截图并计算了
-        if (auto front_task_ptr = Task.get(m_cur_tasks_name.front());
-            front_task_ptr->algorithm == AlgorithmType::JustReturn) {
-            m_cur_task_ptr = front_task_ptr;
+        if (front_task_ptr->algorithm == AlgorithmType::JustReturn) {
+            cur_task_ptr = front_task_ptr;
         }
         else {
             const auto image = Ctrler.get_image();
@@ -93,15 +103,15 @@ bool ProcessTask::_run()
             if (!analyzer.analyze()) {
                 return false;
             }
-            m_cur_task_ptr = analyzer.get_result();
+            cur_task_ptr = analyzer.get_result();
             rect = analyzer.get_rect();
         }
         if (need_exit()) {
             return false;
         }
-        std::string cur_name = m_cur_task_ptr->name;
+        std::string cur_name = cur_task_ptr->name;
 
-        const auto& res_move = m_cur_task_ptr->rect_move;
+        const auto& res_move = cur_task_ptr->rect_move;
         if (!res_move.empty()) {
             rect.x += res_move.x;
             rect.y += res_move.y;
@@ -111,15 +121,20 @@ bool ProcessTask::_run()
 
         int& exec_times = m_exec_times[cur_name];
 
-        int max_times = m_cur_task_ptr->max_times;
+        int max_times = cur_task_ptr->max_times;
         if (auto iter = m_times_limit.find(cur_name);
             iter != m_times_limit.cend()) {
             max_times = iter->second;
         }
 
         if (exec_times >= max_times) {
-            Log.info("exec times exceeds the limit", info.to_string());
-            set_tasks(m_cur_task_ptr->exceeded_next);
+            info["details"] = json::object{
+                { "task", cur_name },
+                { "exec_times", exec_times },
+                { "max_times", max_times }
+            };
+            Log.info("exec times exceeded the limit", info.to_string());
+            m_cur_tasks_name = cur_task_ptr->exceeded_next;
             sleep(task_delay);
             continue;
         }
@@ -129,23 +144,23 @@ bool ProcessTask::_run()
 
         info["details"] = json::object{
             { "task", cur_name },
-            { "action", static_cast<int>(m_cur_task_ptr->action) },
+            { "action", static_cast<int>(cur_task_ptr->action) },
             { "exec_times", exec_times },
             { "max_times", max_times },
-            { "algorithm", static_cast<int>(m_cur_task_ptr->algorithm) }
+            { "algorithm", static_cast<int>(cur_task_ptr->algorithm) }
         };
 
         callback(AsstMsg::SubTaskStart, info);
 
         // 前置固定延时
-        if (!sleep(m_cur_task_ptr->pre_delay)) {
+        if (!sleep(cur_task_ptr->pre_delay)) {
             return false;
         }
 
         bool need_stop = false;
-        switch (m_cur_task_ptr->action) {
+        switch (cur_task_ptr->action) {
         case ProcessTaskAction::ClickRect:
-            rect = m_cur_task_ptr->specific_rect;
+            rect = cur_task_ptr->specific_rect;
             [[fallthrough]];
         case ProcessTaskAction::ClickSelf:
             exec_click_task(rect);
@@ -157,7 +172,11 @@ bool ProcessTask::_run()
         } break;
         case ProcessTaskAction::SwipeToTheLeft:
         case ProcessTaskAction::SwipeToTheRight:
-            exec_swipe_task(m_cur_task_ptr->action);
+            exec_swipe_task(cur_task_ptr->action);
+            break;
+        case ProcessTaskAction::SlowlySwipeToTheLeft:
+        case ProcessTaskAction::SlowlySwipeToTheRight:
+            exec_slowly_swipe_task(cur_task_ptr->action);
             break;
         case ProcessTaskAction::DoNothing:
             break;
@@ -174,12 +193,12 @@ bool ProcessTask::_run()
         // 减少其他任务的执行次数
         // 例如，进入吃理智药的界面了，相当于上一次点蓝色开始行动没生效
         // 所以要给蓝色开始行动的次数减一
-        for (const std::string& reduce : m_cur_task_ptr->reduce_other_times) {
+        for (const std::string& reduce : cur_task_ptr->reduce_other_times) {
             --m_exec_times[reduce];
         }
 
         // 后置固定延时
-        int rear_delay = m_cur_task_ptr->rear_delay;
+        int rear_delay = cur_task_ptr->rear_delay;
         if (auto iter = m_rear_delay.find(cur_name);
             iter != m_rear_delay.cend()) {
             rear_delay = iter->second;
@@ -193,7 +212,7 @@ bool ProcessTask::_run()
         if (need_stop) {
             return true;
         }
-        set_tasks(m_cur_task_ptr->next);
+        m_cur_tasks_name = cur_task_ptr->next;
         sleep(task_delay);
     }
 
@@ -227,6 +246,26 @@ void asst::ProcessTask::exec_swipe_task(ProcessTaskAction action)
         break;
     case asst::ProcessTaskAction::SwipeToTheRight:
         Ctrler.swipe(right_rect, left_rect);
+        break;
+    default: // 走不到这里，TODO 报个错
+        break;
+    }
+}
+
+void asst::ProcessTask::exec_slowly_swipe_task(ProcessTaskAction action)
+{
+    LogTraceFunction;
+    static Rect right_rect = Task.get("ProcessTaskSlowlySwipeRightRect")->specific_rect;
+    static Rect left_rect = Task.get("ProcessTaskSlowlySwipeLeftRect")->specific_rect;
+    static int duration = Task.get("ProcessTaskSlowlySwipeRightRect")->pre_delay;
+    static int extra_delay = Task.get("ProcessTaskSlowlySwipeRightRect")->rear_delay;
+
+    switch (action) {
+    case asst::ProcessTaskAction::SlowlySwipeToTheLeft:
+        Ctrler.swipe(left_rect, right_rect, duration, true, extra_delay, true);
+        break;
+    case asst::ProcessTaskAction::SlowlySwipeToTheRight:
+        Ctrler.swipe(right_rect, left_rect, duration, true, extra_delay, true);
         break;
     default: // 走不到这里，TODO 报个错
         break;

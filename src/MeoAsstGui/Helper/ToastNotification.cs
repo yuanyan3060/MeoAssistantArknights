@@ -13,6 +13,7 @@ using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Media;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -79,7 +80,7 @@ namespace MeoAsstGui
             NotificationConstants.NotificationsOverlayWindowMaxCount = 5;
 
             // 默认显示位置
-            NotificationConstants.MessagePosition = NotificationPosition.BottomRight;
+            // NotificationConstants.MessagePosition = NotificationPosition.BottomRight;
 
             // 最小显示宽度
             NotificationConstants.MinWidth = 400d;
@@ -138,46 +139,45 @@ namespace MeoAsstGui
         /// <param name="sounds">提示音类型</param>
         protected async Task PlayNotificationSoundAsync(NotificationSounds sounds = NotificationSounds.None)
         {
-            await Task.Run(() =>
+            try
             {
-
-                try
+                switch (sounds)
                 {
-                    switch (sounds)
-                    {
-                        case NotificationSounds.Exclamation: SystemSounds.Exclamation.Play(); break;
-                        case NotificationSounds.Asterisk: SystemSounds.Asterisk.Play(); break;
-                        case NotificationSounds.Question: SystemSounds.Question.Play(); break;
-                        case NotificationSounds.Beep: SystemSounds.Beep.Play(); break;
-                        case NotificationSounds.Hand: SystemSounds.Hand.Play(); break;
+                    case NotificationSounds.Exclamation: SystemSounds.Exclamation.Play(); break;
+                    case NotificationSounds.Asterisk: SystemSounds.Asterisk.Play(); break;
+                    case NotificationSounds.Question: SystemSounds.Question.Play(); break;
+                    case NotificationSounds.Beep: SystemSounds.Beep.Play(); break;
+                    case NotificationSounds.Hand: SystemSounds.Hand.Play(); break;
 
-                        case NotificationSounds.Notification:
-                            using (var key = Registry.CurrentUser.OpenSubKey(@"AppEvents\Schemes\Apps\.Default\Notification.Default\.Current"))
+                    case NotificationSounds.Notification:
+                        using (var key = Registry.CurrentUser.OpenSubKey(@"AppEvents\Schemes\Apps\.Default\Notification.Default\.Current"))
+                        {
+                            if (key != null)
                             {
-                                if (key != null)
+                                // 获取 (Default) 项
+                                var o = key.GetValue(null);
+                                if (o != null)
                                 {
-                                    // 获取 (Default) 项
-                                    var o = key.GetValue(null);
-                                    if (o != null)
-                                    {
-                                        var theSound = new SoundPlayer((string)o);
-                                        theSound.Play();
-                                    }
-                                }
-                                else
-                                {
-                                    // 如果不支持就播放其它提示音
-                                    PlayNotificationSoundAsync(NotificationSounds.Asterisk);
+                                    var theSound = new SoundPlayer((string)o);
+                                    theSound.Play();
                                 }
                             }
-                            break;
+                            else
+                            {
+                                // 如果不支持就播放其它提示音
+                                await PlayNotificationSoundAsync(NotificationSounds.Asterisk);
+                            }
+                        }
+                        break;
 
-                        case NotificationSounds.None:
-                        default: break;
-                    }
+                    case NotificationSounds.None:
+                    default: break;
                 }
-                catch (Exception) { }
-            }).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Ignore
+            }
         }
 
         #endregion
@@ -294,25 +294,31 @@ namespace MeoAsstGui
             NotificationSounds sound = NotificationSounds.Notification,
             NotificationContent notificationContent = null)
         {
-            notificationContent = notificationContent ?? BaseContent();
+            if (!string.IsNullOrWhiteSpace(ViewStatusStorage.Get("Toast.Position", NotificationPosition.BottomRight.ToString())))
+            {
+                notificationContent = notificationContent ?? BaseContent();
 
-            notificationContent.RowsCount = row;
+                notificationContent.RowsCount = row;
 
-            // 调整显示时间，如果存在按钮的情况下显示时间将强制设为最大时间
-            lifeTime = lifeTime < 3d ? 3d : lifeTime;
+                // 调整显示时间，如果存在按钮的情况下显示时间将强制设为最大时间
+                lifeTime = lifeTime < 3d ? 3d : lifeTime;
 
-            var timeSpan = _buttonLeftAction == null && _buttonRightAction == null
-                ? TimeSpan.FromSeconds(lifeTime)
-                : TimeSpan.MaxValue;
+                var timeSpan = _buttonLeftAction == null && _buttonRightAction == null
+                    ? TimeSpan.FromSeconds(lifeTime)
+                    : TimeSpan.MaxValue;
 
-            // 显示通知
-            _notificationManager.Show(
-                notificationContent,
-                expirationTime: timeSpan,
-                ShowXbtn: false);
+                // 显示通知
+                _notificationManager.Show(
+                    notificationContent,
+                    expirationTime: timeSpan,
+                    ShowXbtn: false);
+            }
 
             // 播放通知提示音
-            PlayNotificationSoundAsync(sound);
+            PlayNotificationSoundAsync(sound).Wait();
+
+            // 任务栏闪烁
+            FlashWindowEx();
         }
 
         /// <summary>
@@ -368,6 +374,88 @@ namespace MeoAsstGui
         }
 
         #endregion
+
+        #endregion
+
+        #region 任务栏闪烁
+
+        /// <summary>
+        /// 闪烁信息
+        /// </summary>
+        private struct FLASHWINFO
+        {
+            /// <summary>
+            /// 结构大小
+            /// </summary>
+            public uint cbSize;
+
+            /// <summary>
+            /// 要闪烁或停止的窗口句柄
+            /// </summary>
+            public IntPtr hwnd;
+
+            /// <summary>
+            /// 闪烁的类型
+            /// </summary>
+            public uint dwFlags;
+
+            /// <summary>
+            /// 闪烁窗口的次数
+            /// </summary>
+            public uint uCount;
+
+            /// <summary>
+            /// 窗口闪烁的频率（毫秒）
+            /// </summary>
+            public uint dwTimeout;
+        }
+
+        /// <summary>
+        /// 闪烁类型
+        /// </summary>
+        public enum FlashType : uint
+        {
+            [Description("停止闪烁")]
+            FLASHW_STOP = 0,
+
+            [Description("只闪烁标题")]
+            FALSHW_CAPTION = 1,
+
+            [Description("只闪烁任务栏")]
+            FLASHW_TRAY = 2,
+
+            [Description("标题和任务栏同时闪烁")]
+            FLASHW_ALL = 3,
+
+            FLASHW_PARAM1 = 4,
+            FLASHW_PARAM2 = 12,
+
+            [Description("闪烁直到达到次数或收到停止")]
+            FLASHW_TIMER = FLASHW_TRAY | FLASHW_PARAM1,
+
+            [Description("未激活时闪烁直到窗口被激活或收到停止")]
+            FLASHW_TIMERNOFG = FLASHW_TRAY | FLASHW_PARAM2
+        }
+
+        [DllImport("user32.dll")] private static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+        /// <summary>
+        /// 闪烁窗口任务栏
+        /// </summary>
+        /// <param name="hWnd">窗口句柄</param>
+        /// <param name="type">闪烁类型</param>
+        /// <param name="count">闪烁次数</param>
+        /// <returns></returns>
+        public static bool FlashWindowEx(IntPtr hWnd = default, FlashType type = FlashType.FLASHW_TIMERNOFG, uint count = 5)
+        {
+            var fInfo = new FLASHWINFO();
+            fInfo.cbSize = Convert.ToUInt32(Marshal.SizeOf(fInfo));
+            fInfo.hwnd = hWnd != default ? hWnd : new WindowInteropHelper(Application.Current.MainWindow).Handle;
+            fInfo.dwFlags = (uint)type;
+            fInfo.uCount = count;
+            fInfo.dwTimeout = 0;
+            return FlashWindowEx(ref fInfo);
+        }
 
         #endregion
 

@@ -37,7 +37,7 @@ namespace asst
         static void set_dirname(std::string dirname) noexcept;
 
         bool try_capture(const EmulatorInfo& info, bool without_handle = false);
-        cv::Mat get_image();
+        cv::Mat get_image(bool raw = false);
         std::vector<uchar> get_image_encode();
 
         // 点击和滑动都是异步执行，返回该任务的id
@@ -67,7 +67,7 @@ namespace asst
         bool connect_adb(const std::string& address);
 
         void pipe_working_proc();
-        std::optional<std::vector<unsigned char>> call_command(const std::string& cmd);
+        std::optional<std::vector<unsigned char>> call_command(const std::string& cmd, int64_t timeout = 20 * 1000);
         int push_cmd(const std::string& cmd);
 
         using DecodeFunc = std::function<bool(const std::vector<uchar>&)>;

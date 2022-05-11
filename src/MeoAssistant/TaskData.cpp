@@ -44,7 +44,7 @@ bool asst::TaskData::parse(const json::value& json)
     for (const auto& [name, task_json] : json.as_object()) {
         std::string algorithm_str = task_json.get("algorithm", "matchtemplate");
         std::transform(algorithm_str.begin(), algorithm_str.end(), algorithm_str.begin(), to_lower);
-        AlgorithmType algorithm = AlgorithmType::Invaild;
+        AlgorithmType algorithm = AlgorithmType::Invalid;
         if (algorithm_str == "matchtemplate") {
             algorithm = AlgorithmType::MatchTemplate;
         }
@@ -89,7 +89,7 @@ bool asst::TaskData::parse(const json::value& json)
             for (const json::value& text : task_json.at("text").as_array()) {
                 ocr_task_info_ptr->text.emplace_back(text.as_string());
             }
-            ocr_task_info_ptr->need_full_match = task_json.get("need_match", false);
+            ocr_task_info_ptr->need_full_match = task_json.get("fullMatch", false);
             if (task_json.contains("ocrReplace")) {
                 for (const json::value& rep : task_json.at("ocrReplace").as_array()) {
                     ocr_task_info_ptr->replace_map.emplace(rep.as_array()[0].as_string(), rep.as_array()[1].as_string());
@@ -145,6 +145,12 @@ bool asst::TaskData::parse(const json::value& json)
         }
         else if (action == "swipetotheright") {
             task_info_ptr->action = ProcessTaskAction::SwipeToTheRight;
+        }
+        else if (action == "slowlyswipetotheleft") {
+            task_info_ptr->action = ProcessTaskAction::SlowlySwipeToTheLeft;
+        }
+        else if (action == "slowlyswipetotheright") {
+            task_info_ptr->action = ProcessTaskAction::SlowlySwipeToTheRight;
         }
         else {
             m_last_error = "Task: " + name + " error: " + action;

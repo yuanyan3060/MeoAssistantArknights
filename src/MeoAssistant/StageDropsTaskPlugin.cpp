@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <chrono>
+#include <regex>
 
 #include "Controller.h"
 #include "Resource.h"
@@ -20,6 +21,12 @@ bool asst::StageDropsTaskPlugin::verify(AsstMsg msg, const json::value& details)
     }
 
     if (details.at("details").at("task").as_string() == "EndOfAction") {
+        int64_t pre_start_time = Status.get("LastStartButton2");
+        int64_t pre_recognize_time = Status.get("LastRecognizeDrops");
+        if (pre_start_time + RecognizationTimeOffset == pre_recognize_time) {
+            Log.info("Recognization time too close, pass", pre_start_time, pre_recognize_time);
+            return false;
+        }
         return true;
     }
     else {
@@ -47,11 +54,14 @@ bool asst::StageDropsTaskPlugin::_run()
     }
     drop_info_callback();
 
-    auto upload_future = std::async(
-        std::launch::async,
-        std::bind(&StageDropsTaskPlugin::upload_to_penguin, this));
-    m_upload_pending.emplace_back(std::move(upload_future));
-
+    check_stage_valid();
+    
+    if (m_enable_penguid) {
+        auto upload_future = std::async(
+            std::launch::async,
+            std::bind(&StageDropsTaskPlugin::upload_to_penguin, this));
+        m_upload_pending.emplace_back(std::move(upload_future));
+    }
     return true;
 }
 
@@ -63,10 +73,18 @@ bool asst::StageDropsTaskPlugin::recognize_drops()
     if (need_exit()) {
         return false;
     }
-    cv::Mat image = Ctrler.get_image();
+    cv::Mat image = Ctrler.get_image(true);
     std::string res = Resrc.penguin().recognize(image);
     Log.trace("Results of penguin recognition:\n", res);
     m_cur_drops = json::parse(res).value();
+
+    // 兼容老版本 json 格式
+    auto& drop_area = m_cur_drops["dropArea"];
+    m_cur_drops["drops"] = drop_area["drops"];
+    m_cur_drops["dropTypes"] = drop_area["dropTypes"];
+
+    Status.set("LastRecognizeDrops", Status.get("LastStartButton2") + RecognizationTimeOffset);
+
     return true;
 }
 
@@ -111,10 +129,10 @@ void asst::StageDropsTaskPlugin::set_startbutton_delay()
     LogTraceFunction;
 
     if (!m_startbutton_delay_setted) {
-        int64_t start_times = Status.get("LastStartButton2");
+        int64_t pre_start_time = Status.get("LastStartButton2");
 
-        if (start_times > 0) {
-            int64_t duration = time(nullptr) - start_times;
+        if (pre_start_time > 0) {
+            int64_t duration = time(nullptr) - pre_start_time;
             int elapsed = Task.get("EndOfAction")->pre_delay + Task.get("PRTS")->rear_delay;
             int64_t delay = duration * 1000 - elapsed;
             m_cast_ptr->set_rear_delay("StartButton2", static_cast<int>(delay));
@@ -135,9 +153,14 @@ void asst::StageDropsTaskPlugin::upload_to_penguin()
     callback(AsstMsg::SubTaskStart, info);
 
     // Doc: https://developer.penguin-stats.io/public-api/api-v2-instruction/report-api
-    std::string stage_id = m_cur_drops["stage"]["stageId"].as_string();
+    std::string stage_id = m_cur_drops.get("stage", "stageId", std::string());
     if (stage_id.empty()) {
         info["why"] = "未知关卡";
+        callback(AsstMsg::SubTaskError, info);
+        return;
+    }
+    if (m_cur_drops.get("stars", 0) != 3) {
+        info["why"] = "非三星作战";
         callback(AsstMsg::SubTaskError, info);
         return;
     }
@@ -164,7 +187,37 @@ void asst::StageDropsTaskPlugin::upload_to_penguin()
 
     std::string response = utils::callcmd(cmd_line);
 
+    static const std::regex penguinid_regex(R"(X-Penguin-Set-Penguinid: (\d+))");
+    std::smatch penguinid_sm;
+    if (std::regex_search(response, penguinid_sm, penguinid_regex)) {
+        json::value id_info = basic_info_with_what("PenguinId");
+        id_info["details"]["id"] = std::string(penguinid_sm[1]);
+        callback(AsstMsg::SubTaskExtraInfo, id_info);
+    }
+
     Log.trace("response:\n", response);
 
     callback(AsstMsg::SubTaskCompleted, info);
+}
+
+bool asst::StageDropsTaskPlugin::check_stage_valid()
+{
+    LogTraceFunction;
+
+    std::string stage_code = m_cur_drops.get("stage", "stageCode", std::string());
+
+    if (stage_code.find("-EX-") != std::string::npos) {
+        json::value info = basic_info();
+        info["subtask"] = "CheckStageValid";
+        info["why"] = "EX关卡";
+        callback(AsstMsg::SubTaskError, info);
+
+        m_cast_ptr->set_times_limit("StartButton1", 0)
+            .set_times_limit("StartButton2", 0)
+            .set_times_limit("MedicineConfirm", 0)
+            .set_times_limit("StoneConfirm", 0);
+
+        return true;
+    }
+    return true;
 }

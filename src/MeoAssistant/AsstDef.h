@@ -8,6 +8,8 @@
 #include <vector>
 #include <climits>
 
+#define NOMINMAX
+
 namespace json
 {
     class value;
@@ -60,7 +62,7 @@ namespace asst
             int half_width_scale = static_cast<int>(width * (1 - scale) / 2);
             int half_hight_scale = static_cast<int>(height * (1 - scale) / 2);
             Rect dst(x + half_width_scale, y + half_hight_scale,
-                     static_cast<int>(width * scale), static_cast<int>(height * scale));
+                static_cast<int>(width * scale), static_cast<int>(height * scale));
             if (dst.x < 0) {
                 dst.x = 0;
             }
@@ -132,7 +134,7 @@ namespace asst
 
     enum class AlgorithmType
     {
-        Invaild = -1,
+        Invalid = -1,
         JustReturn,
         MatchTemplate,
         OcrDetect,
@@ -198,8 +200,10 @@ namespace asst
         DoNothing = 0x200,          // 什么都不做
         Stop = 0x400,               // 停止当前Task
         BasicSwipe = 0x1000,
-        SwipeToTheLeft = BasicSwipe | 1,  // 往左划一下
-        SwipeToTheRight = BasicSwipe | 2, // 往右划一下
+        SwipeToTheLeft = BasicSwipe | 1,                // 往左划一下
+        SwipeToTheRight = BasicSwipe | 2,               // 往右划一下
+        SlowlySwipeToTheLeft = SwipeToTheLeft | 4,      // 慢慢的往左划一下
+        SlowlySwipeToTheRight = SwipeToTheRight | 8     // 慢慢的往右划一下
     };
 
     // 任务信息
@@ -208,7 +212,7 @@ namespace asst
         virtual ~TaskInfo() = default;
         std::string name;         // 任务名
         AlgorithmType algorithm = // 图像算法类型
-            AlgorithmType::Invaild;
+            AlgorithmType::Invalid;
         ProcessTaskAction action = // 要进行的操作
             ProcessTaskAction::Invalid;
         std::vector<std::string> next;               // 下一个可能的任务（列表）
@@ -272,6 +276,7 @@ namespace asst
         std::string swipe;
         std::string display;
         std::string display_format;
+        std::string display_id;
         std::string screencap_raw_with_gzip;
         std::string screencap_encode;
         std::string release;

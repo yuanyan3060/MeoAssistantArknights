@@ -28,6 +28,7 @@
 #include "RuntimeStatus.h"
 #include "StageDropsTaskPlugin.h"
 #include "DronesForShamareTaskPlugin.h"
+#include "ReplenishOriginiumShardTaskPlugin.h"
 
 using namespace asst;
 
@@ -184,15 +185,23 @@ bool asst::Assistant::append_fight(const std::string& stage, int mecidine, int s
     if (!m_inited) {
         return false;
     }
+    json::value params_info = json::object{
+        { "stage", stage },
+        { "mecidine", mecidine },
+        { "stone", stone },
+        { "times", times }
+    };
+    Log.trace("asst::Assistant::append_fight | ", params_info.to_string());
 
     constexpr const char* TaskChain = "Fight";
 
     // 进入选关界面（主界面的“终端”点进去）
     auto terminal_task_ptr = std::make_shared<ProcessTask>(task_callback, (void*)this, TaskChain);
     terminal_task_ptr->set_tasks({ "StageBegin" })
-        .set_times_limit("LastBattle", 0)
+        .set_times_limit("GoLastBattle", 0)
         .set_times_limit("StartButton1", 0)
         .set_times_limit("StartButton2", 0)
+        .set_times_limit("StageSNReturnFlag", 0)
         .set_times_limit("MedicineConfirm", 0)
         .set_times_limit("StoneConfirm", 0);
 
@@ -201,6 +210,7 @@ bool asst::Assistant::append_fight(const std::string& stage, int mecidine, int s
     stage_task_ptr->set_tasks({ stage })
         .set_times_limit("StartButton1", 0)
         .set_times_limit("StartButton2", 0)
+        .set_times_limit("StageSNReturnFlag", 0)
         .set_times_limit("MedicineConfirm", 0)
         .set_times_limit("StoneConfirm", 0);
 
@@ -325,6 +335,9 @@ bool asst::Assistant::append_roguelike(int mode)
     case 1:
         roguelike_task_ptr->set_times_limit("Roguelike1StageTraderLeave", 0);
         break;
+    case 2:
+        roguelike_task_ptr->set_times_limit("Roguelike1StageTraderInvestCancel", 0);
+        break;
     default:
         return false;
     }
@@ -355,10 +368,8 @@ bool Assistant::append_debug()
     {
         constexpr static const char* DebugTaskChain = "Debug";
 
-        auto debug_task_ptr = std::make_shared<ProcessTask>(task_callback, (void*)this, DebugTaskChain);
-        debug_task_ptr->set_tasks({ "Roguelike1Begin" });
-        debug_task_ptr->regiseter_plugin<RoguelikeFormationTaskPlugin>();
-        debug_task_ptr->regiseter_plugin<RoguelikeBattleTaskPlugin>();
+        auto debug_task_ptr = std::make_shared<RoguelikeBattleTaskPlugin>(task_callback, (void*)this, DebugTaskChain);
+        debug_task_ptr->set_stage_name("暴君");
 
         m_tasks_queue.emplace(debug_task_ptr);
     }
@@ -419,14 +430,15 @@ bool asst::Assistant::append_infrast(infrast::WorkMode work_mode, const std::vec
         .set_work_mode(work_mode)
         .set_mood_threshold(dorm_threshold)
         .set_retry_times(InfrastRetryTimes);
+    mfg_task_ptr->regiseter_plugin<ReplenishOriginiumShardTaskPlugin>();
 
     auto trade_task_ptr = std::make_shared<InfrastTradeTask>(task_callback, (void*)this, InfrastTaskCahin);
     trade_task_ptr->set_uses_of_drone(uses_of_drones)
         .set_work_mode(work_mode)
         .set_mood_threshold(dorm_threshold)
         .set_retry_times(InfrastRetryTimes);
-
     trade_task_ptr->regiseter_plugin<DronesForShamareTaskPlugin>();
+
     auto power_task_ptr = std::make_shared<InfrastPowerTask>(task_callback, (void*)this, InfrastTaskCahin);
     power_task_ptr->set_work_mode(work_mode)
         .set_mood_threshold(dorm_threshold)

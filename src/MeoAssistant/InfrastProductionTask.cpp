@@ -20,6 +20,11 @@ asst::InfrastProductionTask& asst::InfrastProductionTask::set_uses_of_drone(std:
     return *this;
 }
 
+std::string asst::InfrastProductionTask::get_uses_of_drone() const noexcept
+{
+    return m_uses_of_drones;
+}
+
 void asst::InfrastProductionTask::set_product(std::string product_name) noexcept
 {
     m_product = std::move(product_name);
@@ -193,6 +198,14 @@ size_t asst::InfrastProductionTask::opers_detect()
         if (cur_oper.skills.empty()) {
             --cur_available_num;
             continue;
+        }
+        {
+            std::string skills_str = "[";
+            for (const auto& skill : cur_oper.skills) {
+                skills_str += skill.id + ", ";
+            }
+            skills_str += "]";
+            Log.trace(skills_str, "mood", cur_oper.mood_ratio, "threshold", m_mood_threshold);
         }
         // 心情过低的干员则不可用
         if (cur_oper.mood_ratio < m_mood_threshold) {
@@ -403,8 +416,9 @@ bool asst::InfrastProductionTask::optimal_calc()
             // 允许外部的话，就把单个干员凑进来
             if (group.allow_external) {
                 for (size_t i = cur_combs.size(); i != cur_max_num_of_opers; ++i) {
-                    cur_combs.emplace_back(cur_available_opers.at(i));
-                    cur_efficient += cur_available_opers.at(i).efficient.at(m_product);
+                    size_t index = i - cur_combs.size();
+                    cur_combs.emplace_back(cur_available_opers.at(index));
+                    cur_efficient += cur_available_opers.at(index).efficient.at(m_product);
                 }
             }
             else { // 否则这个组合人不够，就不可用了
@@ -482,14 +496,17 @@ bool asst::InfrastProductionTask::opers_choose()
             }
         }
         auto cur_all_opers = oper_analyzer.get_result();
+        Log.trace("before mood filter, opers size:", cur_all_opers.size());
         // 小于心情阈值的干员则不可用
         auto remove_iter = std::remove_if(cur_all_opers.begin(), cur_all_opers.end(),
             [&](const infrast::Oper& rhs) -> bool {
                 return rhs.mood_ratio < m_mood_threshold;
             });
         cur_all_opers.erase(remove_iter, cur_all_opers.end());
+        Log.trace("after mood filter, opers size:", cur_all_opers.size());
 
         for (auto opt_iter = m_optimal_combs.begin(); opt_iter != m_optimal_combs.end();) {
+            Log.trace("to find", opt_iter->skills.begin()->names.front());
             auto find_iter = std::find_if(
                 cur_all_opers.cbegin(), cur_all_opers.cend(),
                 [&](const infrast::Oper& lhs) -> bool {
@@ -500,6 +517,7 @@ bool asst::InfrastProductionTask::opers_choose()
                         return true;
                     }
                     else {
+                        Log.trace("to comp hash");
                         // 既要技能相同，也要hash相同，双重校验
                         for (const auto& [_, hash] : opt_iter->possible_hashs) {
                             int dist = HashImageAnalyzer::hamming(lhs.name_hash, hash);
@@ -514,12 +532,15 @@ bool asst::InfrastProductionTask::opers_choose()
 
             if (find_iter == cur_all_opers.cend()) {
                 ++opt_iter;
+                Log.trace("not found in this page");
                 continue;
             }
+            Log.trace("found in this page");
             // 这种情况可能是需要选择两个同样的技能，上一次循环选了一个，但是没有把滑出当前页面，本次又识别到了这个已选择的人
             if (find_iter->selected == true) {
                 if (cur_max_num_of_opers != 1) {
                     cur_all_opers.erase(find_iter);
+                    Log.trace("skill matched, but it's selected, pass");
                     continue;
                 }
                 // 但是如果当前设施只有一个位置，即不存在“上次循环”的情况，说明是清除干员按钮没点到

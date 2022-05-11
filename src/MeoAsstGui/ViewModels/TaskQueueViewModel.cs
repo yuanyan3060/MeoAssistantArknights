@@ -9,6 +9,7 @@
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY
 
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
@@ -69,15 +70,52 @@ namespace MeoAsstGui
                 new CombData { Display = "当前关卡", Value = string.Empty },
                 new CombData { Display = "上次作战", Value = "LastBattle" },
                 new CombData { Display = "剿灭作战", Value = "Annihilation" },
-                new CombData { Display = "龙门币-5", Value = "CE-5" },
+                new CombData { Display = "龙门币-6/5", Value = "CE-6" },
+                new CombData { Display = "经验-6/5", Value = "LS-6" },
                 new CombData { Display = "红票-5", Value = "AP-5" },
-                new CombData { Display = "经验-5", Value = "LS-5" },
-                new CombData { Display = "技能-5", Value = "CA-5" }
+                new CombData { Display = "技能-5", Value = "CA-5" },
+                new CombData { Display = "1-7", Value = "1-7" },
+
+                // “愚人号” 活动关卡
+                new CombData { Display = "SN-8", Value = "SN-8" },
+                new CombData { Display = "SN-9", Value = "SN-9" },
+                new CombData { Display = "SN-10", Value = "SN-10" },
+
+                //// “风雪过境” 活动关卡
+                //new CombData { Display = "BI-7", Value = "BI-7" },
+                //new CombData { Display = "BI-8", Value = "BI-8" }
             };
-            // “风雪过境” 活动关卡
-            //StageList.Add(new CombData { Display = "BI-7", Value = "BI-7" });
-            //StageList.Add(new CombData { Display = "BI-8", Value = "BI-8" });
+
+            var now = DateTime.Now;
+            var hour = now.Hour;
+            if (hour >= 0 && hour < 4)
+            {
+                now = now.AddDays(-1);
+            }
+
+            var stage_dict = new Dictionary<string, List<DayOfWeek>>
+            {
+                { "货物运送（龙门币）", new List<DayOfWeek> { DayOfWeek.Tuesday, DayOfWeek.Thursday, DayOfWeek.Saturday, DayOfWeek.Sunday } },
+                { "粉碎防御（红票）", new List<DayOfWeek> { DayOfWeek.Monday, DayOfWeek.Thursday, DayOfWeek.Saturday, DayOfWeek.Sunday } },
+                { "空中威胁（技能）", new List<DayOfWeek> { DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Friday, DayOfWeek.Sunday } },
+                { "资源保障（碳）", new List<DayOfWeek> { DayOfWeek.Monday, DayOfWeek.Wednesday, DayOfWeek.Friday, DayOfWeek.Saturday } },
+                { "战术演习（经验）", new List<DayOfWeek> { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday } },
+                { "周一了，可以打剿灭了~", new List<DayOfWeek> { DayOfWeek.Monday } },
+                { "周日了，记得打剿灭哦~", new List<DayOfWeek> { DayOfWeek.Sunday } }
+            };
+
+            StagesOfToday = "今日关卡小提示：\n";
+
+            foreach (var item in stage_dict)
+            {
+                if (item.Value.Contains(now.DayOfWeek))
+                {
+                    StagesOfToday += item.Key + "\n";
+                }
+            }
         }
+
+        public string StagesOfToday { get; set; }
 
         public void AddLog(string content, string color = "Gray", string weight = "Regular")
         {
@@ -92,6 +130,8 @@ namespace MeoAsstGui
 
         public async void LinkStart()
         {
+            Idle = false;
+
             ClearLog();
 
             SaveSettingValue();
@@ -107,6 +147,7 @@ namespace MeoAsstGui
             if (!catchd)
             {
                 AddLog("连接模拟器失败\n请参考使用说明处理", "darkred");
+                Idle = true;
                 return;
             }
 
@@ -166,9 +207,16 @@ namespace MeoAsstGui
             if (count == 0)
             {
                 AddLog("未选择任务");
+                Idle = true;
                 return;
             }
             setPenguinId();
+
+            if (Idle)   // 一般是点了“停止”按钮了
+            {
+                return;
+            }
+
             ret &= asstProxy.AsstStart();
 
             if (ret)
@@ -179,7 +227,6 @@ namespace MeoAsstGui
             {
                 AddLog("出现未知错误");
             }
-            Idle = !ret;
         }
 
         public void Stop()
@@ -241,7 +288,7 @@ namespace MeoAsstGui
             settings.SaveInfrastOrderList();
             int orderLen = order.Count;
             var asstProxy = _container.Get<AsstProxy>();
-            return asstProxy.AsstAppendInfrast((int)settings.InfrastWorkMode, order.ToArray(), orderLen,
+            return asstProxy.AsstAppendInfrast(1, order.ToArray(), orderLen,
                 settings.UsesOfDrones, settings.DormThreshold / 100.0);
         }
 
@@ -292,12 +339,10 @@ namespace MeoAsstGui
         private bool appendRoguelike()
         {
             var settings = _container.Get<SettingsViewModel>();
-            var asstProxy = _container.Get<AsstProxy>();
             int mode = 0;
-            if (settings.OnlyInvest)
-            {
-                mode = 1;
-            }
+            int.TryParse(settings.RoguelikeMode, out mode);
+
+            var asstProxy = _container.Get<AsstProxy>();
             return asstProxy.AsstAppendRoguelike(mode);
         }
 

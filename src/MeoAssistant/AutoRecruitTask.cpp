@@ -3,9 +3,9 @@
 #include "Resource.h"
 #include "OcrImageAnalyzer.h"
 #include "Controller.h"
-#include "RecruitImageAnalyzer.h"
 #include "ProcessTask.h"
 #include "RecruitTask.h"
+#include "Logger.hpp"
 
 asst::AutoRecruitTask& asst::AutoRecruitTask::set_select_level(std::vector<int> select_level) noexcept
 {
@@ -57,6 +57,7 @@ bool asst::AutoRecruitTask::_run()
     if (!m_use_expedited) {
         return true;
     }
+    Log.info("ready to use expedited");
     // 使用加急许可
     for (; m_cur_times < m_max_times; ++m_cur_times) {
         if (need_exit()) {
@@ -85,20 +86,25 @@ bool asst::AutoRecruitTask::analyze_start_buttons()
     auto image = Ctrler.get_image();
     start_analyzer.set_image(image);
     if (!start_analyzer.analyze()) {
+        Log.info("There is no start button");
         return false;
     }
     start_analyzer.sort_result();
     m_start_buttons = start_analyzer.get_result();
+    Log.info("Recruit start button size", m_start_buttons.size());
     return true;
 }
 
 bool asst::AutoRecruitTask::recruit_index(size_t index)
 {
+    LogTraceFunction;
+
     int delay = Resrc.cfg().get_options().task_delay;
 
     if (m_start_buttons.size() <= index) {
         return false;
     }
+    Log.info("recruit_index", index);
     Rect button = m_start_buttons.at(index).rect;
     Ctrler.click(button);
     sleep(delay);
@@ -108,39 +114,56 @@ bool asst::AutoRecruitTask::recruit_index(size_t index)
 
 bool asst::AutoRecruitTask::calc_and_recruit()
 {
-    RecruitTask recurit_task(m_callback, m_callback_arg, m_task_chain);
-    recurit_task.set_retry_times(m_retry_times);
-    recurit_task.set_param(m_select_level, true);
+    LogTraceFunction;
+
+    RecruitTask recruit_task(m_callback, m_callback_arg, m_task_chain);
+    recruit_task.set_retry_times(m_retry_times);
+    recruit_task.set_param(m_select_level, true);
 
     // 识别错误，放弃这个公招位，直接返回
-    if (!recurit_task.run()) {
+    if (!recruit_task.run()) {
         callback(AsstMsg::SubTaskError, basic_info());
         click_return_button();
         return true;
     }
 
-    int maybe_level = recurit_task.get_maybe_level();
+    int maybe_level = recruit_task.get_maybe_level();
     if (need_exit()) {
         return false;
     }
     // 尝试刷新
     if (m_need_refresh && maybe_level == 3
-        && !recurit_task.get_has_special_tag()
-        && recurit_task.get_has_refresh()) {
+        && !recruit_task.get_has_special_tag()
+        && recruit_task.get_has_refresh()) {
         if (refresh()) {
             return calc_and_recruit();
         }
     }
+    // 如果时间没调整过，那 tag 十有八九也没选，重新试一次
+    // 造成时间没调的原因可见： https://github.com/MaaAssistantArknights/MaaAssistantArknights/pull/300#issuecomment-1073287984
+    if (check_time_unreduced()) {
+        return calc_and_recruit();
+    }
+
     if (need_exit()) {
         return false;
     }
+
     if (std::find(m_confirm_level.cbegin(), m_confirm_level.cend(), maybe_level) != m_confirm_level.cend()) {
-        confirm();
+        if (!confirm()) {
+            return false;
+        }
     }
     else {
         click_return_button();
     }
     return true;
+}
+bool asst::AutoRecruitTask::check_time_unreduced()
+{
+    ProcessTask task(*this, { "RecruitCheckTimeUnreduced" });
+    task.set_retry_times(1);
+    return task.run();
 }
 
 bool asst::AutoRecruitTask::check_recruit_home_page()

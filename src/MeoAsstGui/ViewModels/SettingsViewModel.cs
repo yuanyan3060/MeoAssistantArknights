@@ -15,6 +15,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Notification.Wpf.Constants;
+using Notification.Wpf.Controls;
 using Stylet;
 using StyletIoC;
 
@@ -45,11 +47,13 @@ namespace MeoAsstGui
             _listTitle.Add("自动公招");
             _listTitle.Add("信用商店");
             _listTitle.Add("企鹅数据");
-            _listTitle.Add("连接设置");
+            _listTitle.Add("调试设置");
+            _listTitle.Add("通知显示");
             _listTitle.Add("软件更新");
             //_listTitle.Add("其他");
 
             InfrastInit();
+            ToastPositionInit();
         }
 
         private List<string> _listTitle = new List<string>();
@@ -106,6 +110,13 @@ namespace MeoAsstGui
             };
 
             _dormThresholdLabel = "宿舍入驻心情阈值：" + _dormThreshold + "%";
+
+            RoguelikeModeList = new List<CombData>
+            {
+                new CombData { Display = "尽可能往后打", Value = "0" },
+                new CombData { Display = "刷源石锭投资，第一层商店后直接退出", Value = "1" },
+                new CombData { Display = "刷源石锭投资，投资过后退出", Value = "2" }
+            };
         }
 
         private bool _idle = true;
@@ -124,6 +135,7 @@ namespace MeoAsstGui
         public ObservableCollection<DragItemViewModel> InfrastItemViewModels { get; set; }
 
         public List<CombData> UsesOfDronesList { get; set; }
+        public List<CombData> RoguelikeModeList { get; set; }
 
         private int _dormThreshold = Convert.ToInt32(ViewStatusStorage.Get("Infrast.DormThreshold", "30"));
 
@@ -181,17 +193,6 @@ namespace MeoAsstGui
             {
                 SetAndNotify(ref _usesOfDrones, value);
                 ViewStatusStorage.Set("Infrast.UsesOfDrones", value);
-            }
-        }
-
-        private InfrastWorkMode _infrastWorkMode = InfrastWorkMode.Aggressive;
-
-        public InfrastWorkMode InfrastWorkMode
-        {
-            get { return _infrastWorkMode; }
-            set
-            {
-                SetAndNotify(ref _infrastWorkMode, value);
             }
         }
 
@@ -311,21 +312,21 @@ namespace MeoAsstGui
 
         /* 肉鸽设置 */
 
-        private bool _onlyInvest = System.Convert.ToBoolean(ViewStatusStorage.Get("Roguelike.OnlyInvest", bool.FalseString));
+        private string _roguelikeMode = ViewStatusStorage.Get("Roguelike.Mode", "0");
 
-        public bool OnlyInvest
+        public string RoguelikeMode
         {
-            get { return _onlyInvest; }
+            get { return _roguelikeMode; }
             set
             {
-                SetAndNotify(ref _onlyInvest, value);
-                ViewStatusStorage.Set("Roguelike.OnlyInvest", value.ToString());
+                SetAndNotify(ref _roguelikeMode, value);
+                ViewStatusStorage.Set("Roguelike.Mode", value);
             }
         }
 
         /* 信用商店设置 */
 
-        private bool _creditShopping = System.Convert.ToBoolean(ViewStatusStorage.Get("Mall.CreditShopping", bool.TrueString));
+        private bool _creditShopping = Convert.ToBoolean(ViewStatusStorage.Get("Mall.CreditShopping", bool.TrueString));
 
         public bool CreditShopping
         {
@@ -364,7 +365,7 @@ namespace MeoAsstGui
             }
         }
 
-        private bool _refreshLevel3 = System.Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.RefreshLevel3", bool.TrueString));
+        private bool _refreshLevel3 = Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.RefreshLevel3", bool.TrueString));
 
         public bool RefreshLevel3
         {
@@ -384,7 +385,7 @@ namespace MeoAsstGui
             set { SetAndNotify(ref _useExpedited, value); }
         }
 
-        private bool _chooseLevel3 = System.Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel3", bool.TrueString));
+        private bool _chooseLevel3 = Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel3", bool.TrueString));
 
         public bool ChooseLevel3
         {
@@ -396,7 +397,7 @@ namespace MeoAsstGui
             }
         }
 
-        private bool _chooseLevel4 = System.Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel4", bool.TrueString));
+        private bool _chooseLevel4 = Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel4", bool.TrueString));
 
         public bool ChooseLevel4
         {
@@ -408,7 +409,7 @@ namespace MeoAsstGui
             }
         }
 
-        private bool _chooseLevel5 = System.Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel5", bool.FalseString));
+        private bool _chooseLevel5 = Convert.ToBoolean(ViewStatusStorage.Get("AutoRecruit.ChooseLevel5", bool.FalseString));
 
         public bool ChooseLevel5
         {
@@ -420,8 +421,278 @@ namespace MeoAsstGui
             }
         }
 
+        /* 通知显示设置 */
+
+        #region 通知显示
+
+        // 左上
+        private bool _toastPositionTopLeft = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.TopLeft.ToString();
+        public bool ToastPositionTopLeft
+        {
+            get { return _toastPositionTopLeft; }
+            set
+            {
+                SetAndNotify(ref _toastPositionTopLeft, value);
+
+                if (value)
+                {
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.TopLeft;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.TopLeft.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 上
+        private bool _toastPositionTopCenter = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.TopCenter.ToString();
+        public bool ToastPositionTopCenter
+        {
+            get { return _toastPositionTopCenter; }
+            set
+            {
+                SetAndNotify(ref _toastPositionTopCenter, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.TopCenter;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.TopCenter.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 右上
+        private bool _toastPositionTopRight = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.TopRight.ToString();
+        public bool ToastPositionTopRight
+        {
+            get { return _toastPositionTopRight; }
+            set
+            {
+                SetAndNotify(ref _toastPositionTopRight, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.TopRight;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.TopRight.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 左
+        private bool _toastPositionCenterLeft = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.CenterLeft.ToString();
+        public bool ToastPositionCenterLeft
+        {
+            get { return _toastPositionCenterLeft; }
+            set
+            {
+                SetAndNotify(ref _toastPositionCenterLeft, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.CenterLeft;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.CenterLeft.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 右
+        private bool _toastPositionCenterRight = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.CenterRight.ToString();
+        public bool ToastPositionCenterRight
+        {
+            get { return _toastPositionCenterRight; }
+            set
+            {
+                SetAndNotify(ref _toastPositionCenterRight, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.CenterRight;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.CenterRight.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 左下
+        private bool _toastPositionBottomLeft = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.BottomLeft.ToString();
+        public bool ToastPositionBottomLeft
+        {
+            get { return _toastPositionBottomLeft; }
+            set
+            {
+                SetAndNotify(ref _toastPositionBottomLeft, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomCenter =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.BottomLeft;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.BottomLeft.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 下
+        private bool _toastPositionBottomCenter = ViewStatusStorage.Get("Toast.Position", string.Empty) == NotificationPosition.BottomCenter.ToString();
+        public bool ToastPositionBottomCenter
+        {
+            get { return _toastPositionBottomCenter; }
+            set
+            {
+                SetAndNotify(ref _toastPositionBottomCenter, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomRight = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.BottomCenter;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.BottomCenter.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 右下
+        private bool _toastPositionBottomRight =
+            ViewStatusStorage.Get("Toast.Position", NotificationPosition.BottomRight.ToString()) == NotificationPosition.BottomRight.ToString();
+        public bool ToastPositionBottomRight
+        {
+            get { return _toastPositionBottomRight; }
+            set
+            {
+                SetAndNotify(ref _toastPositionBottomRight, value);
+
+                if (value)
+                {
+                    ToastPositionTopLeft =
+                    ToastPositionTopCenter =
+                    ToastPositionTopRight =
+                    ToastPositionCenterLeft =
+                    ToastPositionCenterRight =
+                    ToastPositionBottomLeft =
+                    ToastPositionBottomCenter = false;
+                    NotificationConstants.MessagePosition = NotificationPosition.BottomRight;
+                    ViewStatusStorage.Set("Toast.Position", NotificationPosition.BottomRight.ToString());
+                }
+                else
+                {
+                    ToastPositionOnlySound();
+                }
+            }
+        }
+
+        // 设置通知只有通知声音
+        private void ToastPositionOnlySound()
+        {
+            if (!ToastPositionTopLeft
+                && !ToastPositionTopCenter
+                && !ToastPositionTopRight
+                && !ToastPositionCenterLeft
+                && !ToastPositionCenterRight
+                && !ToastPositionBottomLeft
+                && !ToastPositionBottomCenter
+                && !ToastPositionBottomRight)
+            {
+                ViewStatusStorage.Set("Toast.Position", string.Empty);
+            }
+        }
+
+        // 通知测试
+        public void ToastPositionTest()
+        {
+            Execute.OnUIThread(() =>
+            {
+                using (var toast = new ToastNotification("通知显示位置测试"))
+                {
+                    toast.AppendContentText("如果选择了新的位置")
+                        .AppendContentText("请先点掉这个通知再测试").Show(lifeTime: 5, row: 2);
+                }
+            });
+        }
+
+        // 通知位置初始化
+        private void ToastPositionInit()
+        {
+            var position = ViewStatusStorage.Get("Toast.Position", NotificationPosition.BottomRight.ToString());
+            if (string.IsNullOrWhiteSpace(position))
+                return;
+
+            NotificationConstants.MessagePosition = (NotificationPosition)Enum.Parse(typeof(NotificationPosition), position);
+        }
+
+        #endregion
+
         /* 软件更新设置 */
-        private bool _updateBeta = System.Convert.ToBoolean(ViewStatusStorage.Get("VersionUpdate.UpdateBeta", bool.FalseString));
+        private bool _updateBeta = Convert.ToBoolean(ViewStatusStorage.Get("VersionUpdate.UpdateBeta", bool.FalseString));
 
         public bool UpdateBeta
         {
@@ -445,7 +716,29 @@ namespace MeoAsstGui
             }
         }
 
-        /* 连接设置 */
+        private bool _useAria2 = Convert.ToBoolean(ViewStatusStorage.Get("VersionUpdate.UseAria2", bool.TrueString));
+        public bool UseAria2
+        {
+            get { return _useAria2; }
+            set
+            {
+                SetAndNotify(ref _useAria2, value);
+                ViewStatusStorage.Set("VersionUpdate.UseAria2", value.ToString());
+            }
+        }
+
+        private bool _autoDownloadUpdatePackage = Convert.ToBoolean(ViewStatusStorage.Get("VersionUpdate.AutoDownloadUpdatePackage", bool.TrueString));
+        public bool AutoDownloadUpdatePackage
+        {
+            get { return _autoDownloadUpdatePackage; }
+            set
+            {
+                SetAndNotify(ref _autoDownloadUpdatePackage, value);
+                ViewStatusStorage.Set("VersionUpdate.AutoDownloadUpdatePackage", value.ToString());
+            }
+        }
+
+        /* 调试设置 */
 
         private string _connectAddress = ViewStatusStorage.Get("Connect.Address", string.Empty);
 
@@ -473,7 +766,7 @@ namespace MeoAsstGui
 
         public void TryToSetBlueStacksHyperVAddress()
         {
-            if (BluestacksConfPath.Length == 0)
+            if (BluestacksConfPath.Length == 0 || !File.Exists(BluestacksConfPath))
             {
                 return;
             }
