@@ -6,6 +6,8 @@
              xmlns:s="https://github.com/canton7/Stylet"
              xmlns:dd="urn:gong-wpf-dragdrop"
              mc:Ignorable="d"
+             xmlns:vm="clr-namespace:MeoAsstGui;assembly=MeoAsstGui"
+             d:DataContext="{d:DesignInstance {x:Type vm:SettingsViewModel}}"
              d:DesignHeight="300" d:DesignWidth="550">
     <Grid>
         <Grid.ColumnDefinitions>
@@ -14,7 +16,7 @@
         </Grid.ColumnDefinitions>
         <ListBox Width="200" Grid.Column="0" Margin="10"
                   dd:DragDrop.IsDragSource="True" dd:DragDrop.IsDropTarget="True"
-                  ItemsSource="{Binding Path=InfrastItemViewModels}">
+                  ItemsSource="{Binding Path=InfrastItemViewModels}" ToolTip="标签顺序可拖动">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Orientation="Horizontal">

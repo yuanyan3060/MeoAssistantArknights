@@ -5,10 +5,11 @@
 
 #include "Logger.hpp"
 #include "Resource.h"
-#include "AipOcr.h"
 
 bool asst::OcrImageAnalyzer::analyze()
 {
+    LogTraceFunction;
+
     m_ocr_result.clear();
 
     std::vector<TextRectProc> preds_vec;
@@ -48,7 +49,7 @@ bool asst::OcrImageAnalyzer::analyze()
     preds_vec.emplace_back(m_pred);
 
     TextRectProc all_pred = [&](TextRect& tr) -> bool {
-        for (auto pred : preds_vec) {
+        for (const auto& pred : preds_vec) {
             if (pred && !pred(tr)) {
                 return false;
             }
@@ -56,21 +57,44 @@ bool asst::OcrImageAnalyzer::analyze()
         return true;
     };
 
-    auto& aip_ocr = Resrc.cfg().get_options().aip_ocr;
-    bool need_local = true;
-    if (aip_ocr.enable) {
-        if (aip_ocr.accurate) {
-            need_local = !AipOcr::get_instance().request_ocr_accurate(m_image, m_ocr_result, all_pred);
-        }
-        else {
-            need_local = !AipOcr::get_instance().request_ocr_general(m_image, m_ocr_result, all_pred);
-        }
+    if (m_roi.x < 0) {
+        Log.warn("roi is out of range", m_roi.to_string());
+        m_roi.x = 0;
     }
-    if (need_local) {
-        m_ocr_result = Resrc.ocr().recognize(m_image, m_roi, all_pred, m_without_det);
+    if (m_roi.y < 0) {
+        Log.warn("roi is out of range", m_roi.to_string());
+        m_roi.y = 0;
     }
+    if (m_roi.x + m_roi.width > m_image.cols) {
+        Log.warn("roi is out of range", m_roi.to_string());
+        m_roi.width = m_image.cols - m_roi.x;
+    }
+    if (m_roi.y + m_roi.height > m_image.rows) {
+        Log.warn("roi is out of range", m_roi.to_string());
+        m_roi.height = m_image.rows - m_roi.y;
+    }
+
+    m_ocr_result = Resrc.ocr().recognize(m_image, m_roi, all_pred, m_without_det);
+
     //log.trace("ocr result", m_ocr_result);
     return !m_ocr_result.empty();
+}
+
+void asst::OcrImageAnalyzer::filter(const TextRectProc& filter_func)
+{
+    std::vector<asst::TextRect> temp_result;
+
+    for (auto&& tr : get_result()) {
+        if (filter_func(tr)) {
+            temp_result.emplace_back(std::move(tr));
+        }
+    }
+    get_result() = std::move(temp_result);
+}
+
+void asst::OcrImageAnalyzer::set_use_cache(bool is_use) noexcept
+{
+    m_use_cache = is_use;
 }
 
 void asst::OcrImageAnalyzer::set_required(std::vector<std::string> required, bool full_match) noexcept
@@ -87,19 +111,23 @@ void asst::OcrImageAnalyzer::set_replace(std::unordered_map<std::string, std::st
 void asst::OcrImageAnalyzer::set_task_info(OcrTaskInfo task_info) noexcept
 {
     m_required = std::move(task_info.text);
-    m_full_match = task_info.need_full_match;
+    m_full_match = task_info.full_match;
     m_replace = std::move(task_info.replace_map);
+    m_use_cache = task_info.cache;
 
-    set_roi(task_info.roi);
-    correct_roi();
-    auto& cache_roi = task_info.region_of_appeared;
-    if (task_info.cache && !cache_roi.empty()) {
-        m_roi = cache_roi;
+    if (m_use_cache && !m_region_of_appeared.empty()) {
+        m_roi = m_region_of_appeared;
         m_without_det = true;
     }
     else {
+        set_roi(task_info.roi);
         m_without_det = false;
     }
+}
+
+std::vector<asst::TextRect>& asst::OcrImageAnalyzer::get_result() noexcept
+{
+    return m_ocr_result;
 }
 
 void asst::OcrImageAnalyzer::set_task_info(std::shared_ptr<TaskInfo> task_ptr)
@@ -112,6 +140,15 @@ void asst::OcrImageAnalyzer::set_task_info(const std::string& task_name)
     set_task_info(Task.get(task_name));
 }
 
+void asst::OcrImageAnalyzer::set_region_of_appeared(Rect region) noexcept
+{
+    m_region_of_appeared = region;
+    if (m_use_cache && !m_region_of_appeared.empty()) {
+        m_roi = m_region_of_appeared;
+        m_without_det = true;
+    }
+}
+
 void asst::OcrImageAnalyzer::set_pred(const TextRectProc& pred)
 {
     m_pred = pred;
@@ -122,10 +159,10 @@ const std::vector<asst::TextRect>& asst::OcrImageAnalyzer::get_result() const no
     return m_ocr_result;
 }
 
-void asst::OcrImageAnalyzer::sort_result()
+void asst::OcrImageAnalyzer::sort_result_horizontal()
 {
     // 按位置排个序
-    std::sort(m_ocr_result.begin(), m_ocr_result.end(),
+    std::sort(get_result().begin(), get_result().end(),
         [](const TextRect& lhs, const TextRect& rhs) -> bool {
             if (std::abs(lhs.rect.y - rhs.rect.y) < 5) { // y差距较小则理解为是同一排的，按x排序
                 return lhs.rect.x < rhs.rect.x;
@@ -133,6 +170,34 @@ void asst::OcrImageAnalyzer::sort_result()
             else {
                 return lhs.rect.y < rhs.rect.y;
             }
+        }
+    );
+}
+
+void asst::OcrImageAnalyzer::sort_result_vertical()
+{
+    // 按位置排个序（顺序如下）
+    // +---+
+    // |1 3|
+    // |2 4|
+    // +---+
+    std::sort(get_result().begin(), get_result().end(),
+        [](const TextRect& lhs, const TextRect& rhs) -> bool {
+            if (std::abs(lhs.rect.x - rhs.rect.x) < 5) { // x差距较小则理解为是同一排的，按y排序
+                return lhs.rect.y < rhs.rect.y;
+            }
+            else {
+                return lhs.rect.x < rhs.rect.x;
+            }
+        }
+    );
+}
+
+void asst::OcrImageAnalyzer::sort_result_by_score()
+{
+    std::sort(get_result().begin(), get_result().end(),
+        [](const TextRect& lhs, const TextRect& rhs) -> bool {
+            return lhs.score > rhs.score;
         }
     );
 }
@@ -148,8 +213,8 @@ void asst::OcrImageAnalyzer::sort_result_by_required()
         m_req_cache.emplace(m_required.at(i), i + 1);
     }
 
-    std::sort(m_ocr_result.begin(), m_ocr_result.end(),
+    std::sort(get_result().begin(), get_result().end(),
         [&m_req_cache](const auto& lhs, const auto& rhs) -> bool {
             return m_req_cache[lhs.text] < m_req_cache[rhs.text];
-    });
+        });
 }

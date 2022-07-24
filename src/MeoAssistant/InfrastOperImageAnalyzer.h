@@ -14,7 +14,7 @@ namespace asst
             Smiley = 1,
             Mood = 2,
             FaceHash = 4,
-            NameHash = 8,
+            //NameHash = 8,
             Selected = 16,
             Doing = 32,
             Skill = 64,
@@ -63,7 +63,6 @@ namespace asst
         void oper_detect();
         void mood_analyze();
         void face_hash_analyze();
-        void name_hash_analyze();
         void skill_analyze();
         void selected_analyze();
         void doing_analyze();

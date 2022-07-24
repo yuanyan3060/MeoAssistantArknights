@@ -17,11 +17,12 @@ bool asst::InfrastClueImageAnalyzer::clue_detect()
 {
     MultiMatchImageAnalyzer clue_analyzer(m_image);
     clue_analyzer.set_task_info("InfrastClue");
+
     clue_analyzer.set_roi(m_roi); // 该任务以外部设置的roi为准
     if (!clue_analyzer.analyze()) {
         return false;
     }
-    clue_analyzer.sort_result();
+    clue_analyzer.sort_result_horizontal();
     for (const auto& res : clue_analyzer.get_result()) {
         m_result.emplace_back(res.rect, std::string());
     }

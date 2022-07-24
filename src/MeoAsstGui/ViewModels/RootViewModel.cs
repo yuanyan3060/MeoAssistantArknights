@@ -9,6 +9,7 @@
 // This program is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY
 
+using System;
 using System.Threading.Tasks;
 using Stylet;
 using StyletIoC;
@@ -29,8 +30,8 @@ namespace MeoAsstGui
         protected override void OnViewLoaded()
         {
             CheckAndUpdateNow();
-            InitProxy();
             InitViewModels();
+            InitProxy();
             ShowUpdateOrDownload();
         }
 
@@ -51,11 +52,14 @@ namespace MeoAsstGui
             var rvm = _container.Get<RecruitViewModel>();
             //var ivm = _container.Get<InfrastViewModel>();
             var svm = _container.Get<SettingsViewModel>();
+            var cvm = _container.Get<CopilotViewModel>();
 
             Items.Add(tvm);
             Items.Add(rvm);
             //Items.Add(ivm);
+            Items.Add(cvm);
             Items.Add(svm);
+            svm.UpdateWindowTitle(); // 在标题栏上显示模拟器和IP端口 必须在 Items.Add(svm)之后执行。
             ActiveItem = tvm;
         }
 
@@ -77,14 +81,24 @@ namespace MeoAsstGui
             {
                 var task = Task.Run(() =>
                 {
-                    if (!vuvm.CheckAndDownloadUpdate())
-                    {
-                        vuvm.ResourceOTA();
-                    }
+                    vuvm.CheckAndDownloadUpdate();
                 });
 
                 await task;
             }
+        }
+
+        private string _windowTitle = "MaaAssistantArknights";
+
+        public string WindowTitle
+        {
+            get => _windowTitle;
+            set => SetAndNotify(ref _windowTitle, value);
+        }
+
+        protected override void OnClose()
+        {
+            App.Current.Shutdown();
         }
     }
 }

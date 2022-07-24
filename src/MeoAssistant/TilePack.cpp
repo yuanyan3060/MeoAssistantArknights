@@ -6,11 +6,15 @@
 
 asst::TilePack::~TilePack() = default;
 
-bool asst::TilePack::load(const std::string & dir)
+bool asst::TilePack::load(const std::string& dir)
 {
     LogTraceFunction;
 
-    constexpr static const char* filename = "/levels.json";
+    if (!std::filesystem::exists(dir)) {
+        return false;
+    }
+
+    constexpr static auto filename = "/levels.json";
 
     try {
         m_tile_calculator = std::make_unique<Map::TileCalc>(
@@ -24,7 +28,7 @@ bool asst::TilePack::load(const std::string & dir)
 }
 
 std::unordered_map<asst::Point, asst::TilePack::TileInfo> asst::TilePack::calc(
-    const std::string & stage_code, bool side) const
+    const std::string& stage_code, bool side) const
 {
     LogTraceFunction;
 
@@ -36,7 +40,7 @@ std::unordered_map<asst::Point, asst::TilePack::TileInfo> asst::TilePack::calc(
     Log.trace("After tiles cacl run");
     if (!ret) {
         Log.info("Tiles calc error!");
-        return std::unordered_map<asst::Point, asst::TilePack::TileInfo>();
+        return {};
     }
 
     std::unordered_map<asst::Point, asst::TilePack::TileInfo> dst;
@@ -50,7 +54,9 @@ std::unordered_map<asst::Point, asst::TilePack::TileInfo> asst::TilePack::calc(
         { "tile_floor", TileKey::Floor },
         { "tile_hole", TileKey::Hole },
         { "tile_telin", TileKey::Telin },
-        { "tile_telout", TileKey::Telout }
+        { "tile_telout", TileKey::Telout },
+        { "tile_volcano", TileKey::Volcano },
+        { "tile_healing", TileKey::Healing },
     };
 
     for (size_t y = 0; y < pos.size(); ++y) {
@@ -58,7 +64,7 @@ std::unordered_map<asst::Point, asst::TilePack::TileInfo> asst::TilePack::calc(
             const auto& cv_p = pos[y][x];
             const auto& tile = tiles[y][x];
 
-            TileKey key = TileKey::Invalid;
+            auto key = TileKey::Invalid;
             if (auto iter = TileKeyMapping.find(tile.tileKey);
                 iter != TileKeyMapping.cend()) {
                 key = iter->second;
@@ -68,11 +74,13 @@ std::unordered_map<asst::Point, asst::TilePack::TileInfo> asst::TilePack::calc(
                 Log.error("Unknown tile type:", tile.tileKey);
             }
 
-            dst.emplace(Point(static_cast<int>(x), static_cast<int>(y)), TileInfo{
+            Point loc(static_cast<int>(x), static_cast<int>(y));
+            dst.emplace(loc, TileInfo{
                     static_cast<BuildableType>(tile.buildableType),
                     static_cast<HeightType>(tile.heightType),
                     key,
-                    Point(static_cast<int>(cv_p.x), static_cast<int>(cv_p.y)) });
+                    Point(static_cast<int>(cv_p.x), static_cast<int>(cv_p.y)),
+                    loc });
         }
     }
     return dst;

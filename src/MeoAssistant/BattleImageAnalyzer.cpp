@@ -4,24 +4,69 @@
 
 #include "MultiMatchImageAnalyzer.h"
 #include "MatchImageAnalyzer.h"
+#include "OcrWithFlagTemplImageAnalyzer.h"
 #include "HashImageAnalyzer.h"
 #include "Logger.hpp"
 #include "TaskData.h"
 
+bool asst::BattleImageAnalyzer::set_target(int target)
+{
+    m_target = target;
+    return true;
+}
+
+void asst::BattleImageAnalyzer::set_pre_total_kills(int pre_total_kills)
+{
+    m_pre_total_kills = pre_total_kills;
+}
+
 bool asst::BattleImageAnalyzer::analyze()
 {
-    // 生命值和家门，只要识别到了任一个，就可以说明当前是在战斗场景
-    bool ret = hp_analyze();
-    ret |= home_analyze();
+    clear();
 
-    if (ret) {
-        opers_analyze();
-        skill_analyze();
+    // HP 作为 flag，无论如何都识别。表明当前画面是在战斗场景的
+    bool ret = hp_analyze() || flag_analyze();
+
+    if (m_target & Target::Home) {
+        ret |= home_analyze();
     }
+
+    if (!ret) {
+        return false;
+    }
+
+    // 可能没有干员（全上场了），所以干员识别结果不影响返回值
+    if (m_target & Target::Oper) {
+        bool oper_ret = opers_analyze();
+        if (m_target == Target::Skill) {
+            ret = oper_ret;
+        }
+    }
+
+    // 可能没有可使用的技能，所以技能识别结果不影响返回值
+    if (m_target & Target::Skill) {
+        bool skill_ret = skill_analyze();
+        if (m_target == Target::Skill) {
+            ret = skill_ret;
+        }
+    }
+
+    if (m_target & Target::Kills) {
+        ret &= kills_analyze();
+    }
+
+    if (m_target & Target::Cost) {
+        ret &= cost_analyze();
+    }
+
+    if (m_target & Target::Vacancies) {
+        ret &= vacancies_analyze();
+    }
+
     return ret;
 }
 
-const std::vector<asst::BattleImageAnalyzer::Oper>& asst::BattleImageAnalyzer::get_opers() const noexcept
+const std::vector<asst::BattleRealTimeOper>& asst::BattleImageAnalyzer::get_opers() const noexcept
 {
     return m_opers;
 }
@@ -41,6 +86,31 @@ int asst::BattleImageAnalyzer::get_hp() const noexcept
     return m_hp;
 }
 
+int asst::BattleImageAnalyzer::get_kills() const noexcept
+{
+    return m_kills;
+}
+
+int asst::BattleImageAnalyzer::get_total_kills() const noexcept
+{
+    return m_total_kills;
+}
+
+int asst::BattleImageAnalyzer::get_cost() const noexcept
+{
+    return m_cost;
+}
+
+void asst::BattleImageAnalyzer::clear() noexcept
+{
+    m_opers.clear();
+    m_homes.clear();
+    m_ready_skills.clear();
+    m_hp = 0;
+    m_kills = 0;
+    m_cost = 0;
+}
+
 bool asst::BattleImageAnalyzer::opers_analyze()
 {
     LogTraceFunction;
@@ -50,16 +120,22 @@ bool asst::BattleImageAnalyzer::opers_analyze()
     if (!flags_analyzer.analyze()) {
         return false;
     }
-    flags_analyzer.sort_result();
+    flags_analyzer.sort_result_horizontal();
 
     const auto click_move = Task.get("BattleOperClickRange")->rect_move;
     const auto role_move = Task.get("BattleOperRoleRange")->rect_move;
     const auto cost_move = Task.get("BattleOperCostRange")->rect_move;
     const auto avlb_move = Task.get("BattleOperAvailable")->rect_move;
+    const auto cooling_move = Task.get("BattleOperCooling")->rect_move;
 
+    size_t index = 0;
     for (const MatchRect& flag_mrect : flags_analyzer.get_result()) {
-        Oper oper;
+        BattleRealTimeOper oper;
         oper.rect = flag_mrect.rect.move(click_move);
+        if (oper.rect.x + oper.rect.width >= m_image.cols) {
+            oper.rect.width = m_image.cols - oper.rect.x;
+        }
+        oper.avatar = m_image(utils::make_rect<cv::Rect>(oper.rect));
 
         Rect available_rect = flag_mrect.rect.move(avlb_move);
         oper.available = oper_available_analyze(available_rect);
@@ -73,11 +149,22 @@ bool asst::BattleImageAnalyzer::opers_analyze()
         }
 #endif
 
+        Rect cooling_rect = flag_mrect.rect.move(cooling_move);
+        if (cooling_rect.x + cooling_rect.width >= m_image.cols) {
+            cooling_rect.width = m_image.cols - cooling_rect.x;
+        }
+        oper.cooling = oper_cooling_analyze(cooling_rect);
+        if (oper.cooling && oper.available) {
+            Log.error("oper is available, but with cooling");
+        }
+
         Rect role_rect = flag_mrect.rect.move(role_move);
         oper.role = oper_role_analyze(role_rect);
-        Rect cost_rect = flag_mrect.rect.move(cost_move);
 
-        oper.cost = oper_cost_analyze(cost_rect);
+        // 费用识别的不太准，暂时也没用上，先注释掉，TODO：优化费用识别
+        //Rect cost_rect = flag_mrect.rect.move(cost_move);
+        //oper.cost = oper_cost_analyze(cost_rect);
+        oper.index = index++;
 
         m_opers.emplace_back(std::move(oper));
     }
@@ -85,23 +172,23 @@ bool asst::BattleImageAnalyzer::opers_analyze()
     return true;
 }
 
-asst::BattleImageAnalyzer::Role asst::BattleImageAnalyzer::oper_role_analyze(const Rect& roi)
+asst::BattleRole asst::BattleImageAnalyzer::oper_role_analyze(const Rect& roi)
 {
-    static const std::unordered_map<Role, std::string> RolesName = {
-        { Role::Caster, "Caster" },
-        { Role::Medic, "Medic" },
-        { Role::Pioneer, "Pioneer" },
-        { Role::Sniper, "Sniper" },
-        { Role::Special, "Special" },
-        { Role::Support, "Support" },
-        { Role::Tank, "Tank" },
-        { Role::Warrior, "Warrior" },
-        { Role::Drone, "Drone" }
+    static const std::unordered_map<BattleRole, std::string> RolesName = {
+        { BattleRole::Caster, "Caster" },
+        { BattleRole::Medic, "Medic" },
+        { BattleRole::Pioneer, "Pioneer" },
+        { BattleRole::Sniper, "Sniper" },
+        { BattleRole::Special, "Special" },
+        { BattleRole::Support, "Support" },
+        { BattleRole::Tank, "Tank" },
+        { BattleRole::Warrior, "Warrior" },
+        { BattleRole::Drone, "Drone" }
     };
 
     MatchImageAnalyzer role_analyzer(m_image);
 
-    Role result = Role::Unknown;
+    auto result = BattleRole::Unknown;
     double max_score = 0;
     for (auto&& [role, role_name] : RolesName) {
         role_analyzer.set_task_info("BattleOperRole" + role_name);
@@ -109,10 +196,10 @@ asst::BattleImageAnalyzer::Role asst::BattleImageAnalyzer::oper_role_analyze(con
         if (!role_analyzer.analyze()) {
             continue;
         }
-        if (double cur_socre = role_analyzer.get_result().score;
-            max_score < cur_socre) {
+        if (double cur_score = role_analyzer.get_result().score;
+            max_score < cur_score) {
             result = role;
-            max_score = cur_socre;
+            max_score = cur_score;
         }
     }
 
@@ -129,6 +216,31 @@ asst::BattleImageAnalyzer::Role asst::BattleImageAnalyzer::oper_role_analyze(con
 #endif
 
     return result;
+}
+
+bool asst::BattleImageAnalyzer::oper_cooling_analyze(const Rect& roi)
+{
+    const auto cooling_task_ptr = Task.get<MatchTaskInfo>("BattleOperCooling");
+
+    cv::Mat hsv;
+    cv::cvtColor(m_image(utils::make_rect<cv::Rect>(roi)), hsv, cv::COLOR_BGR2HSV);
+    std::vector<cv::Mat> channels;
+    cv::split(hsv, channels);
+    int mask_lowb = cooling_task_ptr->mask_range.first;
+    int mask_uppb = cooling_task_ptr->mask_range.second;
+
+    int count = 0;
+    auto& h_channel = channels.at(0);
+    for (int i = 0; i != h_channel.rows; ++i) {
+        for (int j = 0; j != h_channel.cols; ++j) {
+            cv::uint8_t value = h_channel.at<cv::uint8_t>(i, j);
+            if (mask_lowb < value && value < mask_uppb) {
+                ++count;
+            }
+        }
+    }
+    Log.trace("oper_cooling_analyze |", count);
+    return count >= cooling_task_ptr->special_threshold;
 }
 
 int asst::BattleImageAnalyzer::oper_cost_analyze(const Rect& roi)
@@ -194,8 +306,8 @@ bool asst::BattleImageAnalyzer::oper_available_analyze(const Rect& roi)
     cv::Scalar avg = cv::mean(hsv);
     Log.trace("oper available, mean", avg[2]);
 
-    static int thres = static_cast<int>(std::dynamic_pointer_cast<MatchTaskInfo>(
-        Task.get("BattleOperAvailable"))->special_threshold);
+    static int thres = static_cast<int>(
+        Task.get<MatchTaskInfo>("BattleOperAvailable")->special_threshold);
     if (avg[2] < thres) {
         return false;
     }
@@ -294,7 +406,7 @@ bool asst::BattleImageAnalyzer::hp_analyze()
         range_upper = cv::Scalar(h_u, s_u, v_u);
         std::unordered_map<std::string, std::string> num_hashs;
         for (auto&& num : NumName) {
-            auto hashs_vec = std::dynamic_pointer_cast<HashTaskInfo>(
+            const auto& hashs_vec = std::dynamic_pointer_cast<HashTaskInfo>(
                 Task.get("BattleHp" + num))->hashs;
             for (size_t i = 0; i != hashs_vec.size(); ++i) {
                 num_hashs.emplace(num + "_" + std::to_string(i), hashs_vec.at(i));
@@ -317,7 +429,7 @@ bool asst::BattleImageAnalyzer::hp_analyze()
     for (const std::string& num_name : hash_analyzer.get_min_dist_name()) {
         if (num_name.empty()) {
             Log.error("hash result is empty");
-            return 0;
+            return false;
         }
         hp *= 10;
         hp += num_name.at(0) - '0';
@@ -328,4 +440,109 @@ bool asst::BattleImageAnalyzer::hp_analyze()
 #endif
     m_hp = hp;
     return true;
+}
+
+bool asst::BattleImageAnalyzer::kills_analyze()
+{
+    OcrWithFlagTemplImageAnalyzer kills_analyzer(m_image);
+    kills_analyzer.set_task_info("BattleKillsFlag", "BattleKills");
+    kills_analyzer.set_replace(
+        Task.get<OcrTaskInfo>("NumberOcrReplace")->replace_map);
+
+    if (!kills_analyzer.analyze()) {
+        return false;
+    }
+
+    std::string kills_text = kills_analyzer.get_result().front().text;
+    if (kills_text.empty()) {
+        return false;
+    }
+
+    size_t pos = kills_text.find('/');
+    if (pos == std::string::npos) {
+        Log.warn("cannot found flag /");
+        // 这种时候绝大多数是把 "0/41" 中的 '/' 识别成了别的什么东西（其中又有绝大部分情况是识别成了 '1'）
+        // 所以这里依赖 m_pre_total_kills 转一下
+        if (m_pre_total_kills == 0) {
+            // 第一次识别就识别错了，识别成了 "0141"
+            if (kills_text.at(0) == '0') {
+                pos = 1;
+            }
+            else {
+                Log.error("m_pre_total_kills is zero");
+                return false;
+            }
+        }
+        else {
+            size_t pre_pos = kills_text.find(std::to_string(m_pre_total_kills));
+            if (pre_pos == std::string::npos || pre_pos == 0) {
+                Log.error("can't get pre_pos");
+                return false;
+            }
+            Log.trace("pre total kills pos:", pre_pos);
+            pos = pre_pos - 1;
+        }
+    }
+
+    // 例子中的"0"
+    std::string kills_count = kills_text.substr(0, pos);
+    if (kills_count.empty() ||
+        !std::all_of(kills_count.cbegin(), kills_count.cend(),
+            [](char c) -> bool {return std::isdigit(c);})) {
+        return false;
+    }
+    int cur_kills = std::stoi(kills_count);
+    m_kills = std::max(m_kills, cur_kills);
+
+    // 例子中的"41"
+    std::string total_kills = kills_text.substr(pos + 1, std::string::npos);
+    int cur_total_kills = 0;
+    if (total_kills.empty() ||
+        !std::all_of(total_kills.cbegin(), total_kills.cend(),
+            [](char c) -> bool {return std::isdigit(c);})) {
+        Log.warn("total kills recognition failed, set to", m_pre_total_kills);
+        cur_total_kills = m_pre_total_kills;
+    }
+    else {
+        cur_total_kills = std::stoi(total_kills);
+    }
+    m_total_kills = std::max(cur_total_kills, m_pre_total_kills);
+
+    Log.trace("Kills:", m_kills, "/", m_total_kills);
+    return true;
+}
+
+bool asst::BattleImageAnalyzer::cost_analyze()
+{
+    OcrWithPreprocessImageAnalyzer cost_analyzer(m_image);
+    cost_analyzer.set_task_info("BattleCostData");
+    cost_analyzer.set_replace(
+        Task.get<OcrTaskInfo>("NumberOcrReplace")->replace_map);
+
+    if (!cost_analyzer.analyze()) {
+        return false;
+    }
+
+    std::string cost_str = cost_analyzer.get_result().front().text;
+
+    if (cost_str.empty() ||
+    !std::all_of(cost_str.cbegin(), cost_str.cend(),
+        [](char c) -> bool {return std::isdigit(c);})) {
+        return false;
+    }
+    m_cost = std::stoi(cost_str);
+
+    return true;
+}
+
+bool asst::BattleImageAnalyzer::vacancies_analyze()
+{
+    return false;
+}
+
+bool asst::BattleImageAnalyzer::flag_analyze()
+{
+    MatchImageAnalyzer flag_analyzer(m_image);
+    flag_analyzer.set_task_info("BattleOfficiallyBegin");
+    return flag_analyzer.analyze();
 }

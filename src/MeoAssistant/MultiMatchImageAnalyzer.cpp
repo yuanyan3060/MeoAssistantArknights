@@ -1,16 +1,16 @@
 #include "MultiMatchImageAnalyzer.h"
 
+#include <utility>
+
 #include "Logger.hpp"
 #include "Resource.h"
 #include "TaskData.h"
 
-asst::MultiMatchImageAnalyzer::MultiMatchImageAnalyzer(const cv::Mat image, const Rect& roi, std::string templ_name, double templ_thres)
+asst::MultiMatchImageAnalyzer::MultiMatchImageAnalyzer(const cv::Mat& image, const Rect& roi, std::string templ_name, double templ_thres)
     : AbstractImageAnalyzer(image, roi),
-    m_templ_name(templ_name),
+    m_templ_name(std::move(templ_name)),
     m_templ_thres(templ_thres)
-{
-    ;
-}
+{}
 
 bool asst::MultiMatchImageAnalyzer::analyze()
 {
@@ -26,7 +26,7 @@ bool asst::MultiMatchImageAnalyzer::analyze()
     return multi_match_templ(templ);
 }
 
-void asst::MultiMatchImageAnalyzer::sort_result()
+void asst::MultiMatchImageAnalyzer::sort_result_horizontal()
 {
     // 按位置排个序
     std::sort(m_result.begin(), m_result.end(),
@@ -36,6 +36,20 @@ void asst::MultiMatchImageAnalyzer::sort_result()
             }
             else {
                 return lhs.rect.y < rhs.rect.y;
+            }
+        });
+}
+
+void asst::MultiMatchImageAnalyzer::sort_result_vertical()
+{
+    // 按位置排个序
+    std::sort(m_result.begin(), m_result.end(),
+        [](const MatchRect& lhs, const MatchRect& rhs) -> bool {
+            if (std::abs(lhs.rect.x - rhs.rect.x) < 5) { // x差距较小则理解为是同一排的，按y排序
+                return lhs.rect.y < rhs.rect.y;
+            }
+            else {
+                return lhs.rect.x < rhs.rect.x;
             }
         });
 }
@@ -68,7 +82,7 @@ void asst::MultiMatchImageAnalyzer::set_task_info(MatchTaskInfo task_info) noexc
     set_roi(task_info.roi);
 }
 
-void asst::MultiMatchImageAnalyzer::set_task_info(std::shared_ptr<TaskInfo> task_ptr)
+void asst::MultiMatchImageAnalyzer::set_task_info(const std::shared_ptr<TaskInfo>& task_ptr)
 {
     set_task_info(*std::dynamic_pointer_cast<MatchTaskInfo>(task_ptr));
 }
@@ -131,6 +145,14 @@ bool asst::MultiMatchImageAnalyzer::multi_match_templ(const cv::Mat templ)
             }
         }
     }
+
+#ifdef ASST_DEBUG
+    for (const auto& rect : m_result) {
+        cv::rectangle(m_image_draw, utils::make_rect<cv::Rect>(rect.rect), cv::Scalar(0, 0, 255), 2);
+        cv::putText(m_image_draw, std::to_string(rect.score), cv::Point(rect.rect.x, rect.rect.y), 1, 1, cv::Scalar(0, 0, 255));
+    }
+#endif
+
     std::string log_str = "[ ";
     for (const auto& res : m_result) {
         log_str += res.rect.to_string() + " : " + std::to_string(res.score) + "; ";

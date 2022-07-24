@@ -7,15 +7,18 @@
 
 bool asst::RoguelikeFormationImageAnalyzer::analyze()
 {
+    m_result.clear();
+
     MultiMatchImageAnalyzer opers_analyzer(m_image);
     opers_analyzer.set_task_info("Roguelike1FormationOper");
+
     if (!opers_analyzer.analyze()) {
         return false;
     }
-    opers_analyzer.sort_result();
-    const auto all_opers = opers_analyzer.get_result();
+    opers_analyzer.sort_result_vertical();
+    const auto& all_opers = opers_analyzer.get_result();
     for (const MatchRect& oper_mr : all_opers) {
-        Oper oper;
+        FormationOper oper;
         oper.rect = oper_mr.rect;
         oper.selected = selected_analyze(oper_mr.rect);
 
@@ -28,13 +31,13 @@ bool asst::RoguelikeFormationImageAnalyzer::analyze()
         }
 #endif
 
-        m_result.emplace_back(std::move(oper));
+        m_result.emplace_back(oper);
     }
 
     return !m_result.empty();
 }
 
-const std::vector<asst::RoguelikeFormationImageAnalyzer::Oper>&
+const std::vector<asst::RoguelikeFormationImageAnalyzer::FormationOper>&
 asst::RoguelikeFormationImageAnalyzer::get_result() const noexcept
 {
     return m_result;
@@ -45,8 +48,7 @@ bool asst::RoguelikeFormationImageAnalyzer::selected_analyze(const Rect& roi)
     cv::Mat img_roi = m_image(utils::make_rect<cv::Rect>(roi));
     cv::Mat hsv;
 
-    const auto selected_task_ptr = std::dynamic_pointer_cast<MatchTaskInfo>(
-        Task.get("Roguelike1FormationOperSelected"));
+    const auto selected_task_ptr = Task.get<MatchTaskInfo>("Roguelike1FormationOperSelected");
     cv::cvtColor(img_roi, hsv, cv::COLOR_BGR2HSV);
     std::vector<cv::Mat> channels;
     cv::split(hsv, channels);

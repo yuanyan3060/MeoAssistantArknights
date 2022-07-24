@@ -4,7 +4,7 @@
 #include "OcrImageAnalyzer.h"
 #include "Controller.h"
 #include "ProcessTask.h"
-#include "RecruitTask.h"
+#include "RecruitCalcTask.h"
 #include "Logger.hpp"
 
 asst::AutoRecruitTask& asst::AutoRecruitTask::set_select_level(std::vector<int> select_level) noexcept
@@ -34,6 +34,12 @@ asst::AutoRecruitTask& asst::AutoRecruitTask::set_max_times(int max_times) noexc
 asst::AutoRecruitTask& asst::AutoRecruitTask::set_use_expedited(bool use_or_not) noexcept
 {
     m_use_expedited = use_or_not;
+    return *this;
+}
+
+asst::AutoRecruitTask& asst::AutoRecruitTask::set_skip_robot(bool skip_robot) noexcept
+{
+    m_skip_robot = skip_robot;
     return *this;
 }
 
@@ -78,18 +84,26 @@ bool asst::AutoRecruitTask::_run()
     return true;
 }
 
+void asst::AutoRecruitTask::callback(AsstMsg msg, const json::value& detail)
+{
+    if (msg == AsstMsg::SubTaskError) {
+        click_return_button();
+    }
+    AbstractTask::callback(msg, detail);
+}
+
 bool asst::AutoRecruitTask::analyze_start_buttons()
 {
     OcrImageAnalyzer start_analyzer;
     start_analyzer.set_task_info("StartRecruit");
 
-    auto image = Ctrler.get_image();
+    auto image = m_ctrler->get_image();
     start_analyzer.set_image(image);
     if (!start_analyzer.analyze()) {
         Log.info("There is no start button");
         return false;
     }
-    start_analyzer.sort_result();
+    start_analyzer.sort_result_horizontal();
     m_start_buttons = start_analyzer.get_result();
     Log.info("Recruit start button size", m_start_buttons.size());
     return true;
@@ -106,7 +120,7 @@ bool asst::AutoRecruitTask::recruit_index(size_t index)
     }
     Log.info("recruit_index", index);
     Rect button = m_start_buttons.at(index).rect;
-    Ctrler.click(button);
+    m_ctrler->click(button);
     sleep(delay);
 
     return calc_and_recruit();
@@ -116,53 +130,113 @@ bool asst::AutoRecruitTask::calc_and_recruit()
 {
     LogTraceFunction;
 
-    RecruitTask recruit_task(m_callback, m_callback_arg, m_task_chain);
-    recruit_task.set_retry_times(m_retry_times);
-    recruit_task.set_param(m_select_level, true);
+    int refresh_count = 0;       // 点击刷新按钮的次数
+    int cur_retry_times = 0;     // 重新识别的次数，参考下面的两个 continue
+    const int refresh_limit = 3; // 点击刷新按钮的次数上限
+    int maybe_level;
+    bool has_robot_tag;
 
-    // 识别错误，放弃这个公招位，直接返回
-    if (!recruit_task.run()) {
-        callback(AsstMsg::SubTaskError, basic_info());
-        click_return_button();
+    while (cur_retry_times < m_retry_times) {
+        RecruitCalcTask recruit_task(m_callback, m_callback_arg, m_task_chain);
+        recruit_task.set_param(m_select_level, true, m_skip_robot)
+            .set_retry_times(m_retry_times)
+            .set_exit_flag(m_exit_flag)
+            .set_ctrler(m_ctrler)
+            .set_status(m_status)
+            .set_task_id(m_task_id);
+
+        // 识别错误，放弃这个公招位，直接返回
+        if (!recruit_task.run()) {
+            json::value info = basic_info();
+            info["what"] = "RecruitError";
+            info["why"] = "识别错误";
+            callback(AsstMsg::SubTaskError, info);
+            return true;
+        }
+
+        has_robot_tag = recruit_task.get_has_robot_tag();
+        maybe_level = recruit_task.get_maybe_level();
+        if (need_exit()) {
+            return false;
+        }
+        // 尝试刷新
+        if (m_need_refresh && maybe_level == 3
+            && !recruit_task.get_has_special_tag()
+            && recruit_task.get_has_refresh()
+            && !(m_skip_robot && has_robot_tag)) {
+            if (refresh()) {
+                if (++refresh_count > refresh_limit) {
+                    // 按理来说不会到这里，因为超过三次刷新的时候上面的 recruit_task.get_has_refresh() 应该是 false
+                    // 报个错，返回
+                    json::value info = basic_info();
+                    info["what"] = "RecruitError";
+                    info["why"] = "刷新次数达到上限";
+                    info["details"] = json::object{
+                        { "refresh_limit", refresh_limit }
+                    };
+                    callback(AsstMsg::SubTaskError, info);
+                    return true;
+                }
+                else {
+                    json::value info = basic_info();
+                    info["what"] = "RecruitTagsRefreshed";
+                    info["details"] = json::object{
+                        { "count", refresh_count },
+                        { "refresh_limit", refresh_limit }
+                    };
+                    callback(AsstMsg::SubTaskExtraInfo, info);
+                    Log.trace("recruit tags refreshed for the " + std::to_string(refresh_count) + "-th time, rerunning recruit task");
+                    continue;
+                }
+            }
+        }
+        // 如果时间没调整过，那 tag 十有八九也没选，重新试一次
+        // 造成时间没调的原因可见： https://github.com/MaaAssistantArknights/MaaAssistantArknights/pull/300#issuecomment-1073287984
+        // 这里如果时间没调整过，但是 tag 点上了，再来一次是不是会又把 tag 点掉？
+        if (!check_time_reduced()) {
+            ++cur_retry_times;
+            Log.warn("unreduced recruit check time detected, rerunning recruit task");
+            continue;
+        }
+
+        if (need_exit()) {
+            return false;
+        }
+
+        if (!(m_skip_robot && has_robot_tag) && std::find(m_confirm_level.cbegin(), m_confirm_level.cend(), maybe_level) != m_confirm_level.cend()) {
+            if (!confirm()) {
+                return false;
+            }
+        }
+        else {
+            click_return_button();
+        }
+
         return true;
     }
 
-    int maybe_level = recruit_task.get_maybe_level();
-    if (need_exit()) {
-        return false;
-    }
-    // 尝试刷新
-    if (m_need_refresh && maybe_level == 3
-        && !recruit_task.get_has_special_tag()
-        && recruit_task.get_has_refresh()) {
-        if (refresh()) {
-            return calc_and_recruit();
-        }
-    }
-    // 如果时间没调整过，那 tag 十有八九也没选，重新试一次
-    // 造成时间没调的原因可见： https://github.com/MaaAssistantArknights/MaaAssistantArknights/pull/300#issuecomment-1073287984
-    if (check_time_unreduced()) {
-        return calc_and_recruit();
-    }
-
-    if (need_exit()) {
-        return false;
-    }
-
-    if (std::find(m_confirm_level.cbegin(), m_confirm_level.cend(), maybe_level) != m_confirm_level.cend()) {
-        if (!confirm()) {
-            return false;
-        }
-    }
-    else {
-        click_return_button();
-    }
-    return true;
+    // 重试次数达到上限时报错并返回
+    json::value info = basic_info();
+    info["what"] = "RecruitError";
+    info["why"] = "重试次数达到上限";
+    info["details"] = json::object{
+        { "m_retry_times", m_retry_times }
+    };
+    callback(AsstMsg::SubTaskError, info);
+    return false;
 }
+
 bool asst::AutoRecruitTask::check_time_unreduced()
 {
     ProcessTask task(*this, { "RecruitCheckTimeUnreduced" });
     task.set_retry_times(1);
+    return task.run();
+}
+
+bool asst::AutoRecruitTask::check_time_reduced()
+{
+    ProcessTask task(*this, { "RecruitCheckTimeReduced" });
+    task.set_retry_times(2);
     return task.run();
 }
 
@@ -182,7 +256,7 @@ bool asst::AutoRecruitTask::recruit_now()
 bool asst::AutoRecruitTask::confirm()
 {
     ProcessTask confirm_task(*this, { "RecruitConfirm" });
-    return confirm_task.run();
+    return confirm_task.set_retry_times(5).run();
 }
 
 bool asst::AutoRecruitTask::refresh()

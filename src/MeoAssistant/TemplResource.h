@@ -15,7 +15,7 @@ namespace asst
 
         virtual ~TemplResource() = default;
 
-        void append_load_required(std::unordered_set<std::string> required) noexcept;
+        void set_load_required(std::unordered_set<std::string> required) noexcept;
         virtual bool load(const std::string& dir) override;
 
         bool exist_templ(const std::string& key) const noexcept;
@@ -26,5 +26,7 @@ namespace asst
     private:
         std::unordered_set<std::string> m_templs_filename;
         std::unordered_map<std::string, cv::Mat> m_templs;
+
+        bool m_loaded = false;
     };
 }

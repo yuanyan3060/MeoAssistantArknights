@@ -6,25 +6,29 @@
 #include <regex>
 
 #include <opencv2/opencv.hpp>
+#include <utility>
 
 #include "AsstUtils.hpp"
 #include "Controller.h"
 #include "Logger.hpp"
 #include "Resource.h"
 #include "AbstractTaskPlugin.h"
+#include "ProcessTask.h"
 
 using namespace asst;
 
 AbstractTask::AbstractTask(AsstCallback callback, void* callback_arg, std::string task_chain)
-    : m_callback(callback),
+    : m_callback(std::move(callback)),
     m_callback_arg(callback_arg),
     m_task_chain(std::move(task_chain))
-{
-    ;
-}
+{}
 
 bool asst::AbstractTask::run()
 {
+    if (!m_enable) {
+        Log.info("task disabled, pass", basic_info().to_string());
+        return true;
+    }
     callback(AsstMsg::SubTaskStart, basic_info());
     for (m_cur_retry = 0; m_cur_retry <= m_retry_times; ++m_cur_retry) {
         if (_run()) {
@@ -58,6 +62,36 @@ AbstractTask& asst::AbstractTask::set_retry_times(int times) noexcept
     return *this;
 }
 
+AbstractTask& asst::AbstractTask::set_ctrler(std::shared_ptr<Controller> ctrler) noexcept
+{
+    m_ctrler = std::move(ctrler);
+    return *this;
+}
+
+AbstractTask& asst::AbstractTask::set_status(std::shared_ptr<RuntimeStatus> status) noexcept
+{
+    m_status = std::move(status);
+    return *this;
+}
+
+AbstractTask& asst::AbstractTask::set_enable(bool enable) noexcept
+{
+    m_enable = enable;
+    return *this;
+}
+
+AbstractTask& asst::AbstractTask::set_ignore_error(bool ignore) noexcept
+{
+    m_ignore_error = ignore;
+    return *this;
+}
+
+AbstractTask& asst::AbstractTask::set_task_id(int task_id) noexcept
+{
+    m_task_id = task_id;
+    return *this;
+}
+
 void asst::AbstractTask::clear_plugin() noexcept
 {
     m_plugins.clear();
@@ -81,6 +115,7 @@ json::value asst::AbstractTask::basic_info() const
 
         m_basic_info_cache = json::object{
             { "taskchain", m_task_chain },
+            { "taskid", m_task_id },
             { "class", class_name },
             { "subtask", task_name },
             { "details", json::object() }
@@ -104,44 +139,37 @@ bool AbstractTask::sleep(unsigned millisecond)
         return false;
     }
     if (millisecond == 0) {
+        std::this_thread::yield();
         return true;
     }
     auto start = std::chrono::steady_clock::now();
-    long long duration = 0;
-
     Log.trace("ready to sleep", millisecond);
+    auto millisecond_ms = std::chrono::milliseconds(millisecond);
+    auto interval = millisecond_ms / 5;
 
-    while (!need_exit() && duration < millisecond) {
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start).count();
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        std::this_thread::yield();
+    while (!need_exit()) {
+        std::this_thread::sleep_for(interval);
+        if (std::chrono::steady_clock::now() - start > millisecond_ms) {
+            break;
+        }
     }
     Log.trace("end of sleep", millisecond);
 
     return !need_exit();
 }
 
-bool AbstractTask::save_image(const cv::Mat image, const std::string& dir)
-{
-    std::filesystem::create_directory(dir);
-    const std::string time_str = utils::string_replace_all(utils::string_replace_all(utils::get_format_time(), " ", "_"), ":", "-");
-    const std::string filename = dir + time_str + ".png";
-
-    bool ret = cv::imwrite(filename, image);
-
-    return ret;
-}
-
 bool asst::AbstractTask::need_exit() const
 {
-    return m_exit_flag != nullptr && *m_exit_flag == true;
+    return m_exit_flag != nullptr && *m_exit_flag;
 }
 
 void asst::AbstractTask::callback(AsstMsg msg, const json::value& detail)
 {
-    for (TaskPluginPtr plugin : m_plugins) {
+    for (const TaskPluginPtr& plugin : m_plugins) {
         plugin->set_exit_flag(m_exit_flag);
+        plugin->set_ctrler(m_ctrler);
+        plugin->set_task_id(m_task_id);
+        plugin->set_status(m_status);
         plugin->set_task_ptr(this);
 
         if (!plugin->verify(msg, detail)) {
@@ -159,11 +187,5 @@ void asst::AbstractTask::callback(AsstMsg msg, const json::value& detail)
 
 void asst::AbstractTask::click_return_button()
 {
-    LogTraceFunction;
-    const auto return_task_ptr = Task.get("Return");
-
-    Rect ReturnButtonRect = return_task_ptr->specific_rect;
-
-    Ctrler.click(ReturnButtonRect);
-    sleep(return_task_ptr->rear_delay);
+    ProcessTask(*this, { "Return" }).run();
 }

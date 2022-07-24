@@ -10,7 +10,10 @@
 // but WITHOUT ANY WARRANTY
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -19,47 +22,59 @@ using StyletIoC;
 
 namespace MeoAsstGui
 {
+    using AsstHandle = IntPtr;
+    using TaskId = Int32;
+
     public class AsstProxy
     {
         private delegate void CallbackDelegate(int msg, IntPtr json_buffer, IntPtr custom_arg);
 
         private delegate void ProcCallbckMsg(AsstMsg msg, JObject details);
 
-        [DllImport("MeoAssistant.dll")] private static extern IntPtr AsstCreate(string dirname);
+        [DllImport("MeoAssistant.dll")] private static extern bool AsstLoadResource(byte[] dirname);
 
-        [DllImport("MeoAssistant.dll")] private static extern IntPtr AsstCreateEx(string dirname, CallbackDelegate callback, IntPtr custom_arg);
+        private static bool AsstLoadResource(string dirname)
+        {
+            return AsstLoadResource(Encoding.UTF8.GetBytes(dirname));
+        }
 
-        [DllImport("MeoAssistant.dll")] private static extern void AsstDestroy(IntPtr ptr);
+        [DllImport("MeoAssistant.dll")] private static extern AsstHandle AsstCreate();
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstCatchDefault(IntPtr ptr);
+        [DllImport("MeoAssistant.dll")] private static extern AsstHandle AsstCreateEx(CallbackDelegate callback, IntPtr custom_arg);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstCatchCustom(IntPtr ptr, string address);
+        [DllImport("MeoAssistant.dll")] private static extern void AsstDestroy(AsstHandle handle);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendStartUp(IntPtr ptr);
+        [DllImport("MeoAssistant.dll")] private static extern bool AsstConnect(AsstHandle handle, byte[] adb_path, byte[] address, byte[] config);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendFight(IntPtr ptr, string stage, int max_medicine, int max_stone, int max_times);
+        private static bool AsstConnect(AsstHandle handle, string adb_path, string address, string config)
+        {
+            return AsstConnect(handle, Encoding.UTF8.GetBytes(adb_path), Encoding.UTF8.GetBytes(address), Encoding.UTF8.GetBytes(config));
+        }
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendAward(IntPtr ptr);
+        [DllImport("MeoAssistant.dll")] private static extern TaskId AsstAppendTask(AsstHandle handle, byte[] type, byte[] task_params);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendVisit(IntPtr ptr);
+        private static TaskId AsstAppendTask(AsstHandle handle, string type, string task_params)
+        {
+            return AsstAppendTask(handle, Encoding.UTF8.GetBytes(type), Encoding.UTF8.GetBytes(task_params));
+        }
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendMall(IntPtr ptr, bool with_shopping);
+        [DllImport("MeoAssistant.dll")] private static extern bool AsstSetTaskParams(AsstHandle handle, TaskId id, byte[] task_params);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendInfrast(IntPtr ptr, int work_mode, string[] order, int order_len, string uses_of_drones, double dorm_threshold);
+        private static bool AsstSetTaskParams(AsstHandle handle, TaskId id, string task_params)
+        {
+            return AsstSetTaskParams(handle, id, Encoding.UTF8.GetBytes(task_params));
+        }
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendRecruit(IntPtr ptr, int max_times, int[] select_level, int required_len, int[] confirm_level, int confirm_len, bool need_refresh, bool use_expedited);
+        [DllImport("MeoAssistant.dll")] private static extern bool AsstStart(AsstHandle handle);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstAppendRoguelike(IntPtr ptr, int mode);
+        [DllImport("MeoAssistant.dll")] private static extern bool AsstStop(AsstHandle handle);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstStartRecruitCalc(IntPtr ptr, int[] select_level, int required_len, bool set_time);
+        [DllImport("MeoAssistant.dll")] private static extern void AsstLog(byte[] level, byte[] message);
 
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstStart(IntPtr ptr);
-
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstStop(IntPtr ptr);
-
-        [DllImport("MeoAssistant.dll")] private static extern bool AsstSetPenguinId(IntPtr p_asst, string id);
-
-        //[DllImport("MeoAssistant.dll")] private static extern bool AsstSetParam(IntPtr p_asst, string type, string param, string value);
+        public static void AsstLog(string message)
+        {
+            AsstLog(Encoding.UTF8.GetBytes("GUI"), Encoding.UTF8.GetBytes(message));
+        }
 
         private readonly CallbackDelegate _callback;
 
@@ -70,19 +85,92 @@ namespace MeoAsstGui
             _callback = CallbackFunction;
         }
 
+        ~AsstProxy()
+        {
+            if (_handle != IntPtr.Zero)
+            {
+                AsstDestroy();
+            }
+        }
+
+        private string _curResource = "_Unloaded";
+
+        public bool LoadGlobalResource()
+        {
+            var settingsModel = _container.Get<SettingsViewModel>();
+            if (settingsModel.ClientType == _curResource)
+            {
+                return true;
+            }
+
+            bool loaded = true;
+            if (settingsModel.ClientType == String.Empty
+                || settingsModel.ClientType == "Official" || settingsModel.ClientType == "Bilibili")
+            {
+                // The resources of Official and Bilibili are the same
+                if (_curResource == "Official" || _curResource == "Bilibili")
+                {
+                    return true;
+                }
+                loaded = AsstLoadResource(System.IO.Directory.GetCurrentDirectory());
+            }
+            else if (_curResource == "Official" || _curResource == "Bilibili")
+            {
+                // Load basic resources for CN client first
+                // Then load global incremental resources
+                loaded = AsstLoadResource(System.IO.Directory.GetCurrentDirectory() + "\\resource\\global\\" + settingsModel.ClientType);
+            }
+            else
+            {
+                // Load basic resources for CN client first
+                // Then load global incremental resources
+                loaded = AsstLoadResource(System.IO.Directory.GetCurrentDirectory())
+                    && AsstLoadResource(System.IO.Directory.GetCurrentDirectory() + "\\resource\\global\\" + settingsModel.ClientType);
+            }
+
+            if (loaded)
+            {
+                if (settingsModel.ClientType == String.Empty)
+                {
+                    _curResource = "Official";
+                }
+                else
+                {
+                    _curResource = settingsModel.ClientType;
+                }
+            }
+            return loaded;
+        }
+
         public void Init()
         {
-            _ptr = AsstCreateEx(System.IO.Directory.GetCurrentDirectory(), _callback, IntPtr.Zero);
-            if (_ptr == IntPtr.Zero)
+            bool loaded = LoadGlobalResource();
+
+            _handle = AsstCreateEx(_callback, IntPtr.Zero);
+
+            if (loaded == false || _handle == IntPtr.Zero)
             {
                 Execute.OnUIThread(() =>
                 {
                     _windowManager.ShowMessageBox("出现未知异常", "错误", icon: MessageBoxImage.Error);
-                    Environment.Exit(0);
+                    App.Current.Shutdown();
                 });
             }
-            var tvm = _container.Get<TaskQueueViewModel>();
-            tvm.Idle = true;
+            var mainModel = _container.Get<TaskQueueViewModel>();
+            mainModel.Idle = true;
+            var settingsModel = _container.Get<SettingsViewModel>();
+            Execute.OnUIThread(async () =>
+            {
+                var task = Task.Run(() =>
+                {
+                    settingsModel.TryToStartEmulator();
+                });
+                await task;
+                if (settingsModel.RunDirectly)
+                {
+                    mainModel.LinkStart();
+                }
+            });
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Ansi, ExactSpelling = true)]
@@ -118,7 +206,7 @@ namespace MeoAsstGui
 
         private readonly IWindowManager _windowManager;
         private readonly IContainer _container;
-        private IntPtr _ptr;
+        private IntPtr _handle;
 
         private void procMsg(AsstMsg msg, JObject details)
         {
@@ -129,10 +217,11 @@ namespace MeoAsstGui
 
                 case AsstMsg.InitFailed:
                     _windowManager.ShowMessageBox("初始化错误！请检查是否使用了中文路径", "错误", icon: MessageBoxImage.Error);
-                    Environment.Exit(0);
+                    App.Current.Shutdown();
                     break;
 
-                case AsstMsg.ConnectionError:
+                case AsstMsg.ConnectionInfo:
+                    procConnectInfo(details);
                     break;
 
                 case AsstMsg.AllTasksCompleted:
@@ -152,47 +241,130 @@ namespace MeoAsstGui
             }
         }
 
+        private bool connected = false;
+        private string connected_adb;
+        private string connected_address;
+
+        private void procConnectInfo(JObject details)
+        {
+            var what = details["what"].ToString();
+            var svm = _container.Get<SettingsViewModel>();
+            var mainModel = _container.Get<TaskQueueViewModel>();
+            switch (what)
+            {
+                case "Connected":
+                    connected = true;
+                    connected_adb = details["details"]["adb"].ToString();
+                    connected_address = details["details"]["address"].ToString();
+                    svm.ConnectAddress = connected_address;
+                    break;
+
+                case "UnsupportedResolution":
+                    connected = false;
+                    mainModel.AddLog("模拟器分辨率不支持，请设置为 720p 或更高，且为 16:9 比例", "darkred");
+                    break;
+
+                case "ResolutionError":
+                    connected = false;
+                    mainModel.AddLog("模拟器分辨率获取失败，建议重启电脑，或更换模拟器后再试", "darkred");
+                    break;
+
+                case "Reconnecting":
+                    mainModel.AddLog("模拟器断开，正在重试", "darkred");
+                    break;
+
+                case "Reconnected":
+                    mainModel.AddLog("重连成功，继续任务");
+                    break;
+
+                case "Disconnect":
+                    connected = false;
+                    mainModel.AddLog("错误！连接断开！", "darkred");
+                    AsstStop();
+                    break;
+            }
+        }
+
         private void procTaskChainMsg(AsstMsg msg, JObject details)
         {
             string taskChain = details["taskchain"].ToString();
 
-            if (taskChain == "RecruitCalc")
+            if (taskChain == "CloseDown")
+            {
+                return;
+            }
+
+            if (taskChain == "Recruit")
             {
                 if (msg == AsstMsg.TaskChainError)
                 {
                     var recruitModel = _container.Get<RecruitViewModel>();
                     recruitModel.RecruitInfo = "识别错误！";
                 }
-                return;
             }
             var mainModel = _container.Get<TaskQueueViewModel>();
+            var copilotModel = _container.Get<CopilotViewModel>();
 
             switch (msg)
             {
                 case AsstMsg.TaskChainError:
                     mainModel.AddLog("任务出错：" + taskChain, "darkred");
+                    if (taskChain == "Copilot")
+                    {
+                        copilotModel.Idle = true;
+                        copilotModel.AddLog("战斗出错！", "darkred");
+                    }
                     break;
 
                 case AsstMsg.TaskChainStart:
+                    if (taskChain == "Fight")
+                    {
+                        mainModel.FightTaskRunning = true;
+                    }
                     mainModel.AddLog("开始任务：" + taskChain);
                     break;
 
                 case AsstMsg.TaskChainCompleted:
                     mainModel.AddLog("完成任务：" + taskChain);
+                    if (taskChain == "Copilot")
+                    {
+                        copilotModel.Idle = true;
+                        copilotModel.AddLog("完成战斗", "darkcyan");
+                    }
                     break;
 
                 case AsstMsg.TaskChainExtraInfo:
                     break;
 
                 case AsstMsg.AllTasksCompleted:
-                    mainModel.Idle = true;
-                    mainModel.AddLog("任务已全部完成");
-                    mainModel.UseStone = false;
-                    using (var toast = new ToastNotification("任务已全部完成！"))
+                    bool isMainTaskQueueAllCompleted = true;
+                    var runned_tasks = details["runned_tasks"] as JArray;
+                    if (runned_tasks.Count == 1)
                     {
-                        toast.Show();
+                        var unique_runned_task = (TaskId)runned_tasks[0];
+                        if (unique_runned_task == (_latestTaskId.TryGetValue(TaskType.Copilot, out var copilotTaskId) ? copilotTaskId : 0)
+                            || unique_runned_task == (_latestTaskId.TryGetValue(TaskType.RecruitCalc, out var recruitCalcTaskId) ? recruitCalcTaskId : 0)
+                            || unique_runned_task == (_latestTaskId.TryGetValue(TaskType.CloseDown, out var closeDownTaskId) ? closeDownTaskId : 0))
+                        {
+                            isMainTaskQueueAllCompleted = false;
+                        }
                     }
-                    mainModel.CheckAndShutdown();
+                    _latestTaskId.Clear();
+
+                    mainModel.Idle = true;
+                    mainModel.UseStone = false;
+                    copilotModel.Idle = true;
+
+                    if (isMainTaskQueueAllCompleted)
+                    {
+                        mainModel.AddLog("任务已全部完成");
+                        using (var toast = new ToastNotification("任务已全部完成！"))
+                        {
+                            toast.Show();
+                        }
+                        //mainModel.CheckAndShutdown();
+                        mainModel.CheckAfterCompleted();
+                    }
                     break;
             }
         }
@@ -232,17 +404,27 @@ namespace MeoAsstGui
 
             switch (subTask)
             {
-                case "AutoRecruitTask":
-                    mainModel.AddLog("公招识别错误，已返回", "darkred");
+                case "StartGameTask":
+                    mainModel.AddLog("打开客户端失败，请检查配置文件", "darkred");
                     break;
 
-                //case "StageDropsTask":
-                //    mainModel.AddLog("关卡识别错误", "darkred");
-                //    break;
+                case "AutoRecruitTask":
+                    {
+                        var why_str = details.TryGetValue("why", out var why) ? why.ToString() : "出现错误";
+                        mainModel.AddLog(why_str + "，已返回", "darkred");
+                        break;
+                    }
+
+                case "RecognizeDrops":
+                    mainModel.AddLog("掉落识别错误", "darkred");
+                    break;
 
                 case "ReportToPenguinStats":
-                    mainModel.AddLog("上传企鹅数据错误", "darkred");
-                    break;
+                    {
+                        var why = details["why"].ToString();
+                        mainModel.AddLog(why + "，放弃上传企鹅", "darkred");
+                        break;
+                    }
 
                 case "CheckStageValid":
                     mainModel.AddLog("EX 关卡，已停止", "darkred");
@@ -316,7 +498,7 @@ namespace MeoAsstGui
                         break;
 
                     case "Roguelike1StageTraderEnter":
-                        mainModel.AddLog("关卡：诡异行商");
+                        mainModel.AddLog("关卡：诡意行商");
                         break;
 
                     case "Roguelike1StageSafeHouseEnter":
@@ -324,7 +506,7 @@ namespace MeoAsstGui
                         break;
 
                     case "Roguelike1StageEncounterEnter":
-                        mainModel.AddLog("关卡：不期而遇/古堡馈赠");
+                        mainModel.AddLog("关卡：不期而遇");
                         break;
 
                     //case "Roguelike1StageBoonsEnter":
@@ -346,6 +528,14 @@ namespace MeoAsstGui
                     case "Roguelike1StageTraderInvestSystemFull":
                         mainModel.AddLog("投资达到上限", "darkcyan");
                         break;
+
+                    case "RestartGameAndContinueFighting":
+                        mainModel.AddLog("游戏崩溃，重新启动", "darkgoldenrod");
+                        break;
+
+                    case "OfflineConfirm":
+                        mainModel.AddLog("游戏掉线，重新连接", "darkgoldenrod");
+                        break;
                 }
             }
         }
@@ -358,16 +548,16 @@ namespace MeoAsstGui
         {
             string taskChain = details["taskchain"].ToString();
 
-            if (taskChain == "RecruitCalc")
+            if (taskChain == "Recruit")
             {
                 procRecruitCalcMsg(details);
-                return;
             }
 
             string what = details["what"].ToString();
             var subTaskDetails = details["details"];
 
             var mainModel = _container.Get<TaskQueueViewModel>();
+            var copilotModel = _container.Get<CopilotViewModel>();
             switch (what)
             {
                 case "StageDrops":
@@ -424,6 +614,16 @@ namespace MeoAsstGui
                     }
                     break;
 
+                case "RecruitRobotTag":
+                    {
+                        string special = subTaskDetails["tag"].ToString();
+                        using (var toast = new ToastNotification("公招提示"))
+                        {
+                            toast.AppendContentText(special).ShowRecruitRobot();
+                        }
+                    }
+                    break;
+
                 case "RecruitResult":
                     {
                         int level = (int)subTaskDetails["level"];
@@ -438,6 +638,16 @@ namespace MeoAsstGui
                         else
                         {
                             mainModel.AddLog(level + " 星 Tags", "darkcyan");
+                        }
+
+                        bool robot = (bool)subTaskDetails["robot"];
+                        if (robot)
+                        {
+                            using (var toast = new ToastNotification($"公招出小车了哦！"))
+                            {
+                                toast.AppendContentText(new string('★', 1)).ShowRecruitRobot(row: 2);
+                            }
+                            mainModel.AddLog(1 + " 星 Tag", "darkgray", "Bold");
                         }
                     }
                     break;
@@ -455,6 +665,13 @@ namespace MeoAsstGui
                         mainModel.AddLog("选择 Tags：\n" + selected_log);
                     }
                     break;
+
+                case "RecruitTagsRefreshed":
+                    {
+                        int refresh_count = (int)subTaskDetails["count"];
+                        mainModel.AddLog("当前槽位已刷新 " + refresh_count + " 次");
+                        break;
+                    }
 
                 case "NotEnoughStaff":
                     {
@@ -482,9 +699,46 @@ namespace MeoAsstGui
                         {
                             string id = subTaskDetails["id"].ToString();
                             settings.PenguinId = id;
-                            AsstSetPenguinId(id);
+                            //AsstSetPenguinId(id);
                         }
                     }
+                    break;
+
+                case "BattleFormation":
+                    copilotModel.AddLog("开始编队\n" + JsonConvert.SerializeObject(subTaskDetails["formation"]));
+                    break;
+
+                case "BattleFormationSelected":
+                    copilotModel.AddLog("选择干员：" + subTaskDetails["selected"].ToString());
+                    break;
+
+                case "BattleAction":
+                    {
+                        string doc = subTaskDetails["doc"].ToString();
+                        if (doc.Length != 0)
+                        {
+                            string color = subTaskDetails["doc_color"].ToString();
+                            copilotModel.AddLog(doc, color.Length == 0 ? "dark" : color);
+                        }
+                        var action = subTaskDetails["action"].ToString();
+                        if (action.Length != 0)
+                        {
+                            copilotModel.AddLog("当前步骤：" + action);
+                        }
+                    }
+                    break;
+
+                case "BattleActionDoc":
+                    //{
+                    //    string title_color = subTaskDetails["title_color"].ToString();
+                    //    copilotModel.AddLog(subTaskDetails["title"].ToString(), title_color.Length == 0 ? "dark" : title_color);
+                    //    string details_color = subTaskDetails["details_color"].ToString();
+                    //    copilotModel.AddLog(subTaskDetails["details"].ToString(), details_color.Length == 0 ? "dark" : details_color);
+                    //}
+                    break;
+
+                case "UnsupportedLevel":
+                    copilotModel.AddLog("不支持的关卡\n请更新 MAA 软件版本，或检查作业文件", "darkred");
                     break;
             }
         }
@@ -511,16 +765,6 @@ namespace MeoAsstGui
                     }
                     break;
 
-                case "RecruitSpecialTag":
-                    {
-                        string special = subTaskDetails["tag"].ToString();
-                        using (var toast = new ToastNotification("公招提示"))
-                        {
-                            toast.AppendContentText(special).ShowRecruit();
-                        }
-                    }
-                    break;
-
                 case "RecruitResult":
                     {
                         string resultContent = string.Empty;
@@ -542,96 +786,259 @@ namespace MeoAsstGui
                             resultContent += "\n\n";
                         }
                         recruitModel.RecruitResult = resultContent;
-                        if (level >= 5)
-                        {
-                            using (var toast = new ToastNotification($"公招出 {level} 星了哦！"))
-                            {
-                                toast.AppendContentText(new string('★', level)).ShowRecruit(row: 2);
-                            }
-                        }
                     }
                     break;
             }
         }
 
-        public bool AsstCatch()
+        public bool AsstConnect(ref string error, bool firsttry = false)
         {
+            if (!LoadGlobalResource())
+            {
+                error = "Load Global Resource Failed";
+                return false;
+            }
+
             var settings = _container.Get<SettingsViewModel>();
+            if (connected
+                && connected_adb == settings.AdbPath
+                && connected_address == settings.ConnectAddress)
+            {
+                return true;
+            }
+
+            if (settings.AdbPath == String.Empty ||
+                settings.ConnectAddress == String.Empty)
+            {
+                if (!settings.RefreshAdbConfig(ref error))
+                {
+                    return false;
+                }
+            }
             settings.TryToSetBlueStacksHyperVAddress();
-            if (settings.ConnectAddress.Length == 0)
+
+            bool ret = AsstConnect(_handle, settings.AdbPath, settings.ConnectAddress, settings.ConnectConfig);
+
+            // 尝试默认的备选端口
+            if (!ret)
             {
-                return AsstCatchDefault(_ptr);
+                foreach (var address in settings.DefaultAddress[settings.ConnectConfig])
+                {
+                    ret = AsstConnect(_handle, settings.AdbPath, address, settings.ConnectConfig);
+                    if (ret)
+                    {
+                        settings.ConnectAddress = address;
+                        break;
+                    }
+                }
             }
-            else
+            if (!ret)
             {
-                return AsstCatchCustom(_ptr, settings.ConnectAddress);
+                if (firsttry)
+                {
+                    error = "连接失败\n正在尝试启动模拟器";
+                }
+                else
+                {
+                    error = "连接失败\n请检查连接设置\n或尝试重启电脑";
+                }
             }
+            return ret;
         }
 
-        public bool AsstAppendFight(string stage, int max_medicine, int max_stone, int max_times)
+        private TaskId AsstAppendTaskWithEncoding(string type, JObject task_params = null)
         {
-            return AsstAppendFight(_ptr, stage, max_medicine, max_stone, max_times);
+            task_params = task_params ?? new JObject();
+            return AsstAppendTask(_handle, type, JsonConvert.SerializeObject(task_params));
+        }
+
+        private bool AsstSetTaskParamsWithEncoding(TaskId id, JObject task_params = null)
+        {
+            if (id == 0)
+            {
+                return false;
+            }
+            task_params = task_params ?? new JObject();
+            return AsstSetTaskParams(_handle, id, JsonConvert.SerializeObject(task_params));
+        }
+
+        private enum TaskType
+        {
+            StartUp,
+            CloseDown,
+            Fight,
+            Recruit,
+            Infrast,
+            Visit,
+            Mall,
+            Award,
+            Roguelike,
+            RecruitCalc,
+            Copilot
+        };
+
+        private Dictionary<TaskType, TaskId> _latestTaskId = new Dictionary<TaskType, TaskId>();
+
+        private JObject serializeFightTaskParams(string stage, int max_medicine, int max_stone, int max_times, string drops_item_id, int drops_item_quantity)
+        {
+            var task_params = new JObject();
+            task_params["stage"] = stage;
+            task_params["medicine"] = max_medicine;
+            task_params["stone"] = max_stone;
+            task_params["times"] = max_times;
+            task_params["report_to_penguin"] = true;
+            if (drops_item_quantity != 0)
+            {
+                task_params["drops"] = new JObject();
+                task_params["drops"][drops_item_id] = drops_item_quantity;
+            }
+            var settings = _container.Get<SettingsViewModel>();
+            task_params["client_type"] = settings.ClientType;
+            task_params["penguin_id"] = settings.PenguinId;
+            task_params["server"] = "CN";
+            return task_params;
+        }
+
+        public bool AsstAppendFight(string stage, int max_medicine, int max_stone, int max_times, string drops_item_id, int drops_item_quantity)
+        {
+            var task_params = serializeFightTaskParams(stage, max_medicine, max_stone, max_times, drops_item_id, drops_item_quantity);
+            TaskId id = AsstAppendTaskWithEncoding("Fight", task_params);
+            _latestTaskId[TaskType.Fight] = id;
+            return id != 0;
+        }
+
+        public bool AsstSetFightTaskParams(string stage, int max_medicine, int max_stone, int max_times, string drops_item_id, int drops_item_quantity)
+        {
+            var task_params = serializeFightTaskParams(stage, max_medicine, max_stone, max_times, drops_item_id, drops_item_quantity);
+            return AsstSetTaskParamsWithEncoding(_latestTaskId.TryGetValue(TaskType.Fight, out var task_id) ? task_id : 0, task_params);
         }
 
         public bool AsstAppendAward()
         {
-            return AsstAppendAward(_ptr);
+            TaskId id = AsstAppendTaskWithEncoding("Award");
+            _latestTaskId[TaskType.Award] = id;
+            return id != 0;
         }
 
-        public bool AsstAppendStartUp()
+        public bool AsstAppendStartUp(string client_type, bool enable)
         {
-            return AsstAppendStartUp(_ptr);
+            var task_params = new JObject();
+            task_params["client_type"] = client_type;
+            task_params["start_game_enabled"] = enable;
+            TaskId id = AsstAppendTaskWithEncoding("StartUp", task_params);
+            _latestTaskId[TaskType.StartUp] = id;
+            return id != 0;
+        }
+
+        public bool AsstStartCloseDown()
+        {
+            AsstStop();
+            TaskId id = AsstAppendTaskWithEncoding("CloseDown");
+            _latestTaskId[TaskType.CloseDown] = id;
+            return id != 0 && AsstStart();
         }
 
         public bool AsstAppendVisit()
         {
-            return AsstAppendVisit(_ptr);
+            TaskId id = AsstAppendTaskWithEncoding("Visit");
+            _latestTaskId[TaskType.Visit] = id;
+            return id != 0;
         }
 
-        public bool AsstAppendMall(bool with_shopping)
+        public bool AsstAppendMall(bool with_shopping, string[] firstlist, string[] blacklist)
         {
-            return AsstAppendMall(_ptr, with_shopping);
+            var task_params = new JObject();
+            task_params["shopping"] = with_shopping;
+            task_params["buy_first"] = new JArray { firstlist };
+            task_params["blacklist"] = new JArray { blacklist };
+            TaskId id = AsstAppendTaskWithEncoding("Mall", task_params);
+            _latestTaskId[TaskType.Mall] = id;
+            return id != 0;
         }
 
-        public bool AsstAppendRecruit(int max_times, int[] select_level, int required_len, int[] confirm_level, int confirm_len, bool need_refresh, bool use_expedited)
+        public bool AsstAppendRecruit(int max_times, int[] select_level, int required_len, int[] confirm_level, int confirm_len, bool need_refresh, bool use_expedited, bool skip_robot)
         {
-            return AsstAppendRecruit(_ptr, max_times, select_level, required_len, confirm_level, confirm_len, need_refresh, use_expedited);
+            var task_params = new JObject();
+            task_params["refresh"] = need_refresh;
+            task_params["select"] = new JArray(select_level);
+            task_params["confirm"] = new JArray(confirm_level);
+            task_params["times"] = max_times;
+            task_params["set_time"] = true;
+            task_params["expedite"] = use_expedited;
+            task_params["expedite_times"] = max_times;
+            task_params["skip_robot"] = skip_robot;
+            TaskId id = AsstAppendTaskWithEncoding("Recruit", task_params);
+            _latestTaskId[TaskType.Recruit] = id;
+            return id != 0;
         }
 
         public bool AsstAppendInfrast(int work_mode, string[] order, int order_len, string uses_of_drones, double dorm_threshold)
         {
-            return AsstAppendInfrast(_ptr, work_mode, order, order_len, uses_of_drones, dorm_threshold);
+            var task_params = new JObject();
+            //task_params["mode"] = 0;
+            task_params["facility"] = new JArray(order);
+            task_params["drones"] = uses_of_drones;
+            task_params["threshold"] = dorm_threshold;
+            task_params["replenish"] = true;
+            TaskId id = AsstAppendTaskWithEncoding("Infrast", task_params);
+            _latestTaskId[TaskType.Infrast] = id;
+            return id != 0;
         }
 
-        public bool AsstAppendRoguelike(int mode)
+        public bool AsstAppendRoguelike(int mode, int starts, int invests, bool stop_when_full)
         {
-            return AsstAppendRoguelike(_ptr, mode);
-        }
-
-        public bool AsstStart()
-        {
-            return AsstStart(_ptr);
+            var task_params = new JObject();
+            task_params["mode"] = mode;
+            task_params["starts_count"] = starts;
+            task_params["investments_count"] = invests;
+            task_params["stop_when_investment_full"] = stop_when_full;
+            TaskId id = AsstAppendTaskWithEncoding("Roguelike", task_params);
+            _latestTaskId[TaskType.Roguelike] = id;
+            return id != 0;
         }
 
         public bool AsstStartRecruitCalc(int[] select_level, int required_len, bool set_time)
         {
-            return AsstStartRecruitCalc(_ptr, select_level, required_len, set_time);
+            var task_params = new JObject();
+            task_params["refresh"] = false;
+            task_params["select"] = new JArray(select_level);
+            task_params["confirm"] = new JArray();
+            task_params["times"] = 0;
+            task_params["set_time"] = set_time;
+            task_params["expedite"] = false;
+            task_params["expedite_times"] = 0;
+            TaskId id = AsstAppendTaskWithEncoding("Recruit", task_params);
+            _latestTaskId[TaskType.RecruitCalc] = id;
+            return id != 0 && AsstStart();
+        }
+
+        public bool AsstStartCopilot(string stage_name, string filename, bool formation)
+        {
+            var task_params = new JObject();
+            task_params["stage_name"] = stage_name;
+            task_params["filename"] = filename;
+            task_params["formation"] = formation;
+            TaskId id = AsstAppendTaskWithEncoding("Copilot", task_params);
+            _latestTaskId[TaskType.Copilot] = id;
+            return id != 0 && AsstStart();
+        }
+
+        public bool AsstStart()
+        {
+            return AsstStart(_handle);
         }
 
         public bool AsstStop()
         {
-            return AsstStop(_ptr);
+            bool ret = AsstStop(_handle);
+            _latestTaskId.Clear();
+            return ret;
         }
 
-        public void AsstSetPenguinId(string id)
+        public void AsstDestroy()
         {
-            AsstSetPenguinId(_ptr, id);
+            AsstDestroy(_handle);
         }
-
-        //public void AsstSetParam(string type, string param, string value)
-        //{
-        //    AsstSetParam(_ptr, type, param, value);
-        //}
     }
 
     public enum AsstMsg
@@ -639,7 +1046,7 @@ namespace MeoAsstGui
         /* Global Info */
         InternalError = 0,          // 内部错误
         InitFailed,                 // 初始化失败
-        ConnectionError,            // 连接相关错误
+        ConnectionInfo,            // 连接相关错误
         AllTasksCompleted,          // 全部任务完成
         /* TaskChain Info */
         TaskChainError = 10000,     // 任务链执行/识别错误

@@ -15,11 +15,13 @@ using System.Drawing;
 using System.Media;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Microsoft.Toolkit.Uwp.Notifications;
 using Microsoft.Win32;
 using Notification.Wpf;
 using Notification.Wpf.Base;
@@ -30,6 +32,42 @@ namespace MeoAsstGui
 {
     public class ToastNotification : IDisposable
     {
+        private ToastNotification()
+        {
+            if (!CheckToastSystem())
+            {
+                NotificationConstants.MessagePosition = NotificationPosition.BottomRight;
+            }
+        }
+
+        private static bool _systemToastChecked = false;
+        private static bool _systemToastCheckInited = false;
+
+        public bool CheckToastSystem()
+        {
+            if (!_systemToastCheckInited)
+            {
+                _systemToastCheckInited = true;
+
+                // like "Microsoft Windows 10.0.10240 "
+                var osDesc = RuntimeInformation.OSDescription;
+                Regex versionRegex = new Regex(@"\d+\.\d+\.\d+");
+                var matched = versionRegex.Match(osDesc);
+                if (!matched.Success)
+                {
+                    _systemToastChecked = false;
+                    return _systemToastChecked;
+                }
+                var osVersion = matched.Groups[0].Value;
+                Semver.SemVersion curVersionObj;
+                bool verParsed = Semver.SemVersion.TryParse(osVersion, Semver.SemVersionStyles.Strict, out curVersionObj);
+
+                var minimumVersionObj = new Semver.SemVersion(10, 0, 10240);
+                _systemToastChecked = verParsed && curVersionObj.CompareSortOrderTo(minimumVersionObj) >= 0;
+            }
+            return _systemToastChecked;
+        }
+
         private NotificationManager _notificationManager = new NotificationManager();
 
         /// <summary>
@@ -88,7 +126,7 @@ namespace MeoAsstGui
             // 最大显示宽度
             NotificationConstants.MaxWidth = 460d;
 
-            #endregion
+            #endregion 初始化 Notification.Wpf 默认静态配置
         }
 
         /// <summary>
@@ -130,7 +168,7 @@ namespace MeoAsstGui
             None
         }
 
-        #endregion
+        #endregion 通知提示音列表枚举
 
         /// <summary>
         /// 播放通知提示音
@@ -180,19 +218,36 @@ namespace MeoAsstGui
             }
         }
 
-        #endregion
+        #endregion 通知提示音
 
         #region 通知按钮设置
 
         #region 通知按钮变量
+
         // 左边按钮
         protected string _buttonLeftText = null;
+
         protected Action _buttonLeftAction = null;
 
         // 右边按钮
         protected string _buttonRightText = null;
+
         protected Action _buttonRightAction = null;
-        #endregion
+
+        //系统按钮
+        protected string _buttonSystemText = null;
+
+        protected string _buttonSystemUrl;
+
+        public string ButtonSystemUrl
+        {
+            get { return _buttonSystemUrl; }
+            set { _buttonSystemUrl = value; }
+        }
+
+        protected bool _buttonSystemEnabled = false;
+
+        #endregion 通知按钮变量
 
         /// <summary>
         /// 给通知添加一个在左边的按钮，比如确定按钮，多次设置只会按最后一次设置生效
@@ -204,6 +259,8 @@ namespace MeoAsstGui
         {
             _buttonLeftText = text;
             _buttonLeftAction = action;
+            _buttonSystemText = text;
+            _buttonSystemEnabled = true;
             return this;
         }
 
@@ -217,10 +274,12 @@ namespace MeoAsstGui
         {
             _buttonRightText = text;
             _buttonRightAction = action;
+            _buttonSystemText = text;
+            _buttonSystemEnabled = true;
             return this;
         }
 
-        #endregion
+        #endregion 通知按钮设置
 
         #region 通知显示
 
@@ -279,7 +338,7 @@ namespace MeoAsstGui
             return content;
         }
 
-        #endregion
+        #endregion 通知基本字体样式和内容模板
 
         #region 显示通知方法
 
@@ -290,11 +349,38 @@ namespace MeoAsstGui
         /// <param name="row">内容显示行数，如果内容太多建议使用 ShowMore()</param>
         /// <param name="sound">播放提示音</param>
         /// <param name="notificationContent">通知内容</param>
+        ///
         public void Show(double lifeTime = 10d, uint row = 1,
             NotificationSounds sound = NotificationSounds.Notification,
             NotificationContent notificationContent = null)
         {
-            if (!string.IsNullOrWhiteSpace(ViewStatusStorage.Get("Toast.Position", NotificationPosition.BottomRight.ToString())))
+            if (!Convert.ToBoolean(ViewStatusStorage.Get("GUI.UseNotify", bool.TrueString)))
+            {
+                return;
+            }
+
+            if (CheckToastSystem())
+            {
+                if (_buttonSystemEnabled)
+                {
+                    Uri _burl = new Uri(_buttonSystemUrl);
+                    new ToastContentBuilder()
+                    .AddText(_notificationTitle)
+                    .AddText(_contentCollection.ToString())
+                    .AddButton(new ToastButton()
+                        .SetContent(_buttonSystemText)
+                        .SetProtocolActivation(_burl))
+                    .Show();
+                }
+                else
+                {
+                    new ToastContentBuilder()
+                        .AddText(_notificationTitle)
+                        .AddText(_contentCollection.ToString())
+                        .Show();
+                }
+            }
+            else
             {
                 notificationContent = notificationContent ?? BaseContent();
 
@@ -312,13 +398,13 @@ namespace MeoAsstGui
                     notificationContent,
                     expirationTime: timeSpan,
                     ShowXbtn: false);
+
+                // 播放通知提示音
+                PlayNotificationSoundAsync(sound).Wait();
+
+                // 任务栏闪烁
+                FlashWindowEx();
             }
-
-            // 播放通知提示音
-            PlayNotificationSoundAsync(sound).Wait();
-
-            // 任务栏闪烁
-            FlashWindowEx();
         }
 
         /// <summary>
@@ -359,6 +445,23 @@ namespace MeoAsstGui
         }
 
         /// <summary>
+        /// 显示公招小车标签通知
+        /// </summary>
+        /// <param name="row">内容显示行数，比如第 2 行用来放星星</param>
+        public void ShowRecruitRobot(uint row = 1)
+        {
+            var content = BaseContent();
+
+            // 给通知染上小车相似的颜色
+            content.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#FFFFFFF4");
+            content.Foreground = (SolidColorBrush)new BrushConverter().ConvertFrom("#FF111111");
+
+            Show(row: row,
+                sound: NotificationSounds.Notification,
+                notificationContent: content);
+        }
+
+        /// <summary>
         /// 显示更新版本的通知
         /// </summary>
         /// <param name="row">内容行数</param>
@@ -369,13 +472,13 @@ namespace MeoAsstGui
             content.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#FF007280");
 
             ShowMore(row: row,
-                 sound: NotificationSounds.Notification,
-                 notificationContent: content);
+                    sound: NotificationSounds.Notification,
+                    notificationContent: content);
         }
 
-        #endregion
+        #endregion 显示通知方法
 
-        #endregion
+        #endregion 通知显示
 
         #region 任务栏闪烁
 
@@ -450,14 +553,14 @@ namespace MeoAsstGui
         {
             var fInfo = new FLASHWINFO();
             fInfo.cbSize = Convert.ToUInt32(Marshal.SizeOf(fInfo));
-            fInfo.hwnd = hWnd != default ? hWnd : new WindowInteropHelper(Application.Current.MainWindow).Handle;
+            fInfo.hwnd = hWnd != default ? hWnd : new WindowInteropHelper(App.Current.MainWindow).Handle;
             fInfo.dwFlags = (uint)type;
             fInfo.uCount = count;
             fInfo.dwTimeout = 0;
             return FlashWindowEx(ref fInfo);
         }
 
-        #endregion
+        #endregion 任务栏闪烁
 
         /// <summary>
         /// 通知使用完后释放已使用的数据
@@ -472,6 +575,5 @@ namespace MeoAsstGui
             _buttonLeftText = _buttonRightText = null;
             _buttonLeftAction = _buttonRightAction = null;
         }
-
     }
 }

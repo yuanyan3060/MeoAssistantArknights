@@ -1,5 +1,7 @@
 #include "OcrPack.h"
 
+#include <filesystem>
+
 #include <PaddleOCR/paddle_ocr.h>
 #include <opencv2/opencv.hpp>
 
@@ -8,6 +10,7 @@
 
 asst::OcrPack::OcrPack()
 {
+    Log.info("hardware_concurrency:", std::thread::hardware_concurrency());
     for (size_t i = 0; i != MaxBoxSize; ++i) {
         constexpr static size_t MaxTextSize = 1024;
         *(m_strs_buffer + i) = new char[MaxTextSize];
@@ -26,10 +29,16 @@ asst::OcrPack::~OcrPack()
 
 bool asst::OcrPack::load(const std::string& dir)
 {
-    constexpr static const char* DetName = "/det";
+    LogTraceFunction;
+
+    if (!std::filesystem::exists(dir)) {
+        return false;
+    }
+
+    constexpr static auto DetName = "/det";
     //constexpr static const char* ClsName = "/cls";
-    constexpr static const char* RecName = "/rec";
-    constexpr static const char* KeysName = "/ppocr_keys_v1.txt";
+    constexpr static auto RecName = "/rec";
+    constexpr static auto KeysName = "/ppocr_keys_v1.txt";
 
     const std::string dst_filename = dir + DetName;
     //const std::string cls_filename = dir + ClsName;
@@ -44,7 +53,7 @@ bool asst::OcrPack::load(const std::string& dir)
     return m_ocr != nullptr;
 }
 
-std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat image, const asst::TextRectProc& pred, bool without_det)
+std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat& image, const asst::TextRectProc& pred, bool without_det)
 {
     LogTraceFunction;
 
@@ -81,10 +90,10 @@ std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat image, const 
             int* box = m_boxes_buffer + i * 8;
             int x_collect[4] = { *(box + 0), *(box + 2), *(box + 4), *(box + 6) };
             int y_collect[4] = { *(box + 1), *(box + 3), *(box + 5), *(box + 7) };
-            int left = int(*std::min_element(x_collect, x_collect + 4));
-            int right = int(*std::max_element(x_collect, x_collect + 4));
-            int top = int(*std::min_element(y_collect, y_collect + 4));
-            int bottom = int(*std::max_element(y_collect, y_collect + 4));
+            int left = static_cast<int>(*std::min_element(x_collect, x_collect + 4));
+            int right = static_cast<int>(*std::max_element(x_collect, x_collect + 4));
+            int top = static_cast<int>(*std::min_element(y_collect, y_collect + 4));
+            int bottom = static_cast<int>(*std::max_element(y_collect, y_collect + 4));
             rect = Rect(left, top, right - left, bottom - top);
         }
         std::string text(*(m_strs_buffer + i));
@@ -109,7 +118,7 @@ std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat image, const 
     return result;
 }
 
-std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat image, const asst::Rect& roi, const asst::TextRectProc& pred, bool without_det)
+std::vector<asst::TextRect> asst::OcrPack::recognize(const cv::Mat& image, const asst::Rect& roi, const asst::TextRectProc& pred, bool without_det)
 {
     auto rect_cor = [&roi, &pred, &without_det](TextRect& tr) -> bool {
         if (without_det) {

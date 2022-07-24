@@ -10,6 +10,7 @@
 #include "Logger.hpp"
 #include "MatchImageAnalyzer.h"
 #include "MultiMatchImageAnalyzer.h"
+#include "OcrWithPreprocessImageAnalyzer.h"
 #include "Resource.h"
 #include "RuntimeStatus.h"
 #include "ProcessTask.h"
@@ -31,23 +32,23 @@ void asst::InfrastProductionTask::set_product(std::string product_name) noexcept
 
     json::value callback_info = basic_info_with_what("ProductOfFacility");
     callback_info["details"]["product"] = m_product;
+    // 该回调注册了插件 DronesForShamareTaskPlugin
     callback(AsstMsg::SubTaskExtraInfo, callback_info);
 }
 
 bool asst::InfrastProductionTask::shift_facility_list()
 {
     LogTraceFunction;
-    if (!facility_list_detect()) {
-        return false;
-    }
-    if (need_exit()) {
+    if (!facility_list_detect() || need_exit()) {
         return false;
     }
     const auto tab_task_ptr = Task.get("InfrastFacilityListTab" + facility_name());
     MatchImageAnalyzer add_analyzer;
+
     const auto add_task_ptr = Task.get("InfrastAddOperator" + facility_name() + m_work_mode_name);
     add_analyzer.set_task_info(add_task_ptr);
     MultiMatchImageAnalyzer locked_analyzer;
+
     locked_analyzer.set_task_info("InfrastOperLocked" + facility_name());
 
     for (; m_cur_facility_index < m_facility_list_tabs.size(); ++m_cur_facility_index) {
@@ -59,11 +60,11 @@ bool asst::InfrastProductionTask::shift_facility_list()
             callback(AsstMsg::SubTaskExtraInfo, basic_info_with_what("EnterFacility"));
         }
 
-        Ctrler.click(tab);
+        m_ctrler->click(tab);
         sleep(tab_task_ptr->rear_delay);
 
         /* 识别当前制造/贸易站有没有添加干员按钮，没有就不换班 */
-        const auto image = Ctrler.get_image();
+        const auto image = m_ctrler->get_image();
         add_analyzer.set_image(image);
         if (!add_analyzer.analyze()) {
             Log.info("no add button, just continue");
@@ -81,6 +82,7 @@ bool asst::InfrastProductionTask::shift_facility_list()
 
         /* 识别当前正在造什么 */
         MatchImageAnalyzer product_analyzer(image);
+
         auto& all_products = Resrc.infrast().get_facility_info(facility_name()).products;
         std::string cur_product = all_products.at(0);
         double max_score = 0;
@@ -105,7 +107,7 @@ bool asst::InfrastProductionTask::shift_facility_list()
         }
 
         /* 进入干员选择页面 */
-        Ctrler.click(add_button);
+        m_ctrler->click(add_button);
         sleep(add_task_ptr->rear_delay);
 
         for (int i = 0; i <= OperSelectRetryTimes; ++i) {
@@ -124,8 +126,7 @@ bool asst::InfrastProductionTask::shift_facility_list()
                 opers_detect();
             }
             optimal_calc();
-            bool ret = opers_choose();
-            if (!ret) {
+            if (!opers_choose()) {
                 m_all_available_opers.clear();
                 swipe_to_the_left_of_operlist(2);
                 continue;
@@ -156,14 +157,7 @@ bool asst::InfrastProductionTask::opers_detect_with_swipe()
         size_t num = opers_detect();
         Log.trace("opers_detect return", num);
 
-        // 无论如何也不会没有干员的，除非前面的操作哪里出错了，没进到干员选择的页面。那也就没必要继续下去了
         if (num == 0) {
-            return false;
-        }
-
-        // 这里本来是判断不相等就可以退出循环。
-        // 但是有时候滑动会把一个干员挡住一半，一个页面完整的干员真的只有10个，所以加个2的差值
-        if (max_num_of_opers_per_page - num > 2) {
             break;
         }
 
@@ -180,9 +174,10 @@ bool asst::InfrastProductionTask::opers_detect_with_swipe()
 size_t asst::InfrastProductionTask::opers_detect()
 {
     LogTraceFunction;
-    const auto image = Ctrler.get_image();
+    const auto image = m_ctrler->get_image();
 
     InfrastOperImageAnalyzer oper_analyzer(image);
+
     oper_analyzer.set_facility(facility_name());
 
     if (!oper_analyzer.analyze()) {
@@ -193,10 +188,9 @@ size_t asst::InfrastProductionTask::opers_detect()
 
     const int face_hash_thres = std::dynamic_pointer_cast<HashTaskInfo>(
         Task.get("InfrastOperFaceHash"))->dist_threshold;
-    int cur_available_num = static_cast<int>(cur_all_opers.size());
+    const size_t pre_size = m_all_available_opers.size();
     for (const auto& cur_oper : cur_all_opers) {
         if (cur_oper.skills.empty()) {
-            --cur_available_num;
             continue;
         }
         {
@@ -215,6 +209,9 @@ size_t asst::InfrastProductionTask::opers_detect()
         auto find_iter = std::find_if(
             m_all_available_opers.cbegin(), m_all_available_opers.cend(),
             [&](const infrast::Oper& oper) -> bool {
+                if (oper.skills != cur_oper.skills) {
+                    return false;
+                }
                 // 有可能是同一个干员，比一下hash
                 int dist = HashImageAnalyzer::hamming(cur_oper.face_hash, oper.face_hash);
                 Log.debug("opers_detect hash dist |", dist);
@@ -226,7 +223,7 @@ size_t asst::InfrastProductionTask::opers_detect()
         }
         m_all_available_opers.emplace_back(cur_oper);
     }
-    return cur_available_num;
+    return m_all_available_opers.size() - pre_size;
 }
 
 bool asst::InfrastProductionTask::optimal_calc()
@@ -239,7 +236,7 @@ bool asst::InfrastProductionTask::optimal_calc()
     all_avaliable_combs.reserve(m_all_available_opers.size());
     for (auto&& oper : m_all_available_opers) {
         auto comb = efficient_regex_calc(oper.skills);
-        comb.name_hash = oper.name_hash;
+        comb.name_img = oper.name_img;
         all_avaliable_combs.emplace_back(std::move(comb));
     }
 
@@ -262,7 +259,7 @@ bool asst::InfrastProductionTask::optimal_calc()
 
     std::unordered_map<std::string, int> skills_num;
     for (int i = 0; i != m_all_available_opers.size(); ++i) {
-        auto comb = all_avaliable_combs.at(i);
+        const auto& comb = all_avaliable_combs.at(i);
 
         bool out_of_num = false;
         for (auto&& skill : comb.skills) {
@@ -303,9 +300,6 @@ bool asst::InfrastProductionTask::optimal_calc()
         return true;
     }
 
-    const int name_hash_thres = std::dynamic_pointer_cast<HashTaskInfo>(
-        Task.get("InfrastOperNameHash"))->dist_threshold;
-
     // 遍历所有组合，找到效率最高的
     auto& all_group = Resrc.infrast().get_skills_group(facility_name());
     for (const infrast::SkillsGroup& group : all_group) {
@@ -318,11 +312,12 @@ bool asst::InfrastProductionTask::optimal_calc()
         // 条件判断，不符合的直接过滤掉
         bool meet_condition = true;
         for (const auto& [cond, cond_value] : group.conditions) {
-            if (!Status.contains(cond)) {
+            auto cond_opt = m_status->get_number(cond);
+            if (!cond_opt) {
                 continue;
             }
             // TODO：这里做成除了不等于，还可计算大于、小于等不同条件的
-            int cur_value = static_cast<int>(Status.get(cond));
+            int cur_value = static_cast<int>(cond_opt.value());
             if (cur_value != cond_value) {
                 meet_condition = false;
                 break;
@@ -381,20 +376,22 @@ bool asst::InfrastProductionTask::optimal_calc()
                         return arg == opt;
                     });
                 if (find_iter != cur_available_opers.cend()) {
-                    // 要求技能匹配的同时，hash也要匹配
                     bool hash_matched = false;
-                    if (!opt.possible_hashs.empty()) {
-                        for (const auto& [key, hash] : opt.possible_hashs) {
-                            int dist = HashImageAnalyzer::hamming(find_iter->name_hash, hash);
-                            Log.debug("optimal_calc | name hash dist", dist, hash, find_iter->name_hash);
-                            if (dist < name_hash_thres) {
-                                hash_matched = true;
-                                break;
-                            }
-                        }
+                    if (opt.name_filter.empty()) {
+                        hash_matched = true;
                     }
                     else {
-                        hash_matched = true;
+                        OcrWithPreprocessImageAnalyzer name_analyzer(find_iter->name_img);
+                        name_analyzer.set_replace(
+                            Task.get<OcrTaskInfo>("CharsNameOcrReplace")->replace_map);
+                        Log.trace("Analyze name filter");
+                        if (!name_analyzer.analyze()) {
+                            continue;
+                        }
+                        std::string name = name_analyzer.get_result().front().text;
+                        hash_matched = std::find(
+                            opt.name_filter.cbegin(), opt.name_filter.cend(), name)
+                            != opt.name_filter.cend();
                     }
                     if (!hash_matched) {
                         ++find_iter;
@@ -460,21 +457,22 @@ bool asst::InfrastProductionTask::opers_choose()
     LogTraceFunction;
     bool has_error = false;
 
-    int count = 0;
     auto& facility_info = Resrc.infrast().get_facility_info(facility_name());
     int cur_max_num_of_opers = facility_info.max_num_of_opers - m_cur_num_of_lokced_opers;
 
-    const int name_hash_thres = std::dynamic_pointer_cast<HashTaskInfo>(
-        Task.get("InfrastOperNameHash"))->dist_threshold;
     const int face_hash_thres = std::dynamic_pointer_cast<HashTaskInfo>(
         Task.get("InfrastOperFaceHash"))->dist_threshold;
+
+    int count = 0;
+
     while (true) {
         if (need_exit()) {
             return false;
         }
-        const auto image = Ctrler.get_image();
+        const auto image = m_ctrler->get_image();
 
         InfrastOperImageAnalyzer oper_analyzer(image);
+
         oper_analyzer.set_facility(facility_name());
 
         if (!oper_analyzer.analyze()) {
@@ -504,7 +502,6 @@ bool asst::InfrastProductionTask::opers_choose()
             });
         cur_all_opers.erase(remove_iter, cur_all_opers.end());
         Log.trace("after mood filter, opers size:", cur_all_opers.size());
-
         for (auto opt_iter = m_optimal_combs.begin(); opt_iter != m_optimal_combs.end();) {
             Log.trace("to find", opt_iter->skills.begin()->names.front());
             auto find_iter = std::find_if(
@@ -513,20 +510,21 @@ bool asst::InfrastProductionTask::opers_choose()
                     if (lhs.skills != opt_iter->skills) {
                         return false;
                     }
-                    if (!opt_iter->hash_filter) {
+                    if (opt_iter->name_filter.empty()) {
                         return true;
                     }
                     else {
-                        Log.trace("to comp hash");
-                        // 既要技能相同，也要hash相同，双重校验
-                        for (const auto& [_, hash] : opt_iter->possible_hashs) {
-                            int dist = HashImageAnalyzer::hamming(lhs.name_hash, hash);
-                            Log.debug("opers_choose | name hash dist", dist);
-                            if (dist < name_hash_thres) {
-                                return true;
-                            }
+                        OcrWithPreprocessImageAnalyzer name_analyzer(lhs.name_img);
+                        name_analyzer.set_replace(
+                            Task.get<OcrTaskInfo>("CharsNameOcrReplace")->replace_map);
+                        Log.trace("Analyze name filter");
+                        if (!name_analyzer.analyze()) {
+                            return false;
                         }
-                        return false;
+                        std::string name = name_analyzer.get_result().front().text;
+                        return std::find(
+                            opt_iter->name_filter.cbegin(), opt_iter->name_filter.cend(), name)
+                            != opt_iter->name_filter.cend();
                     }
                 });
 
@@ -546,7 +544,7 @@ bool asst::InfrastProductionTask::opers_choose()
                 // 但是如果当前设施只有一个位置，即不存在“上次循环”的情况，说明是清除干员按钮没点到
             }
             else {
-                Ctrler.click(find_iter->rect);
+                m_ctrler->click(find_iter->rect);
             }
             {
                 auto avlb_iter = std::find_if(
@@ -554,10 +552,7 @@ bool asst::InfrastProductionTask::opers_choose()
                     [&](const infrast::Oper& lhs) -> bool {
                         int dist = HashImageAnalyzer::hamming(lhs.face_hash, find_iter->face_hash);
                         Log.debug("opers_choose | face hash dist", dist);
-                        if (dist < face_hash_thres) {
-                            return true;
-                        }
-                        return false;
+                        return dist < face_hash_thres;
                     }
                 );
                 if (avlb_iter != m_all_available_opers.cend()) {
@@ -572,13 +567,12 @@ bool asst::InfrastProductionTask::opers_choose()
             opt_iter = m_optimal_combs.erase(opt_iter);
         }
         if (m_optimal_combs.empty()) {
-            if (count >= cur_max_num_of_opers) {
-                break;
-            }
-            else { // 这种情况可能是萌新，可用干员人数不足以填满当前设施
+            Log.trace(__FUNCTION__, "| count", count, "cur_max_num_of_opers", cur_max_num_of_opers);
+            if (count < cur_max_num_of_opers) {
+                // 这种情况可能是萌新，可用干员人数不足以填满当前设施
                 callback(AsstMsg::SubTaskExtraInfo, basic_info_with_what("NotEnoughStaff"));
-                break;
             }
+            break;
         }
 
         // 因为识别完了还要点击，所以这里不能异步滑动
@@ -614,7 +608,8 @@ asst::InfrastProductionTask::efficient_regex_calc(
                 // TODO 报错！
             }
             std::string status_key = cur_formula.substr(pos + 1, rp_pos - pos - 1);
-            int64_t status_value = Status.get(status_key);
+            auto status_opt = m_status->get_number(status_key);
+            const int64_t status_value = status_opt ? status_opt.value() : 0;
             cur_formula.replace(pos, rp_pos - pos + 1, std::to_string(status_value));
         }
 
@@ -629,14 +624,15 @@ bool asst::InfrastProductionTask::facility_list_detect()
     LogTraceFunction;
     m_facility_list_tabs.clear();
 
-    const auto image = Ctrler.get_image();
+    const auto image = m_ctrler->get_image();
     MultiMatchImageAnalyzer mm_analyzer(image);
+
     mm_analyzer.set_task_info("InfrastFacilityListTab" + facility_name());
 
     if (!mm_analyzer.analyze()) {
         return false;
     }
-    mm_analyzer.sort_result();
+    mm_analyzer.sort_result_horizontal();
     m_facility_list_tabs.reserve(mm_analyzer.get_result().size());
     for (const auto& res : mm_analyzer.get_result()) {
         m_facility_list_tabs.emplace_back(res.rect);

@@ -3,55 +3,39 @@
 //#include <any>
 #include <unordered_map>
 #include <string>
+#include <optional>
+
+#include "AsstTypes.h"
 
 namespace asst
 {
     class RuntimeStatus
     {
     public:
+        RuntimeStatus() = default;
         RuntimeStatus(const RuntimeStatus& rhs) = delete;
         RuntimeStatus(RuntimeStatus&& rhs) noexcept = delete;
         ~RuntimeStatus() = default;
 
-        static RuntimeStatus& get_instance()
-        {
-            static RuntimeStatus unique_instance;
-            return unique_instance;
-        }
+        std::optional<int64_t> get_number(const std::string& key) const noexcept;
+        void set_number(std::string key, int64_t value);
+        void clear_number() noexcept;
 
-        int64_t get(const std::string& key) const noexcept
-        {
-            if (auto iter = m_data.find(key);
-                iter != m_data.cend()) {
-                return iter->second;
-            }
-            else {
-                return 0;
-            }
-        }
-        bool contains(const std::string& key) const noexcept
-        {
-            return m_data.find(key) != m_data.cend();
-        }
+        std::optional<Rect> get_rect(const std::string& key) const noexcept;
+        void set_rect(std::string key, Rect rect);
+        void clear_rect() noexcept;
 
-        void set(std::string key, int64_t value)
-        {
-            m_data[std::move(key)] = value;
-        }
-
-        void clear() noexcept
-        {
-            m_data.clear();
-        }
+        std::optional<std::string> get_str(const std::string& key) const noexcept;
+        void set_str(std::string key, std::string value);
+        void clear_str() noexcept;
 
         RuntimeStatus& operator=(const RuntimeStatus& rhs) = delete;
         RuntimeStatus& operator=(RuntimeStatus&& rhs) noexcept = delete;
 
     private:
-        RuntimeStatus() = default;
 
-        std::unordered_map<std::string, int64_t> m_data;
+        std::unordered_map<std::string, int64_t> m_number;
+        std::unordered_map<std::string, Rect> m_rect;
+        std::unordered_map<std::string, std::string> m_string;
     };
-
-    static auto& Status = RuntimeStatus::get_instance();
 }

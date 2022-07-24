@@ -3,18 +3,31 @@
 #include <meojson/json.hpp>
 
 #include "AsstUtils.hpp"
+#include "Logger.hpp"
 
 bool asst::AbstractConfiger::load(const std::string& filename)
 {
-    std::string content = utils::load_file_without_bom(filename);
+    LogTraceFunction;
 
-    auto&& ret = json::parser::parse(content);
-    if (!ret) {
-        m_last_error = "json pasing error, content:" + content;
+#ifdef _WIN32
+    Log.info("Load:", utils::ansi_to_utf8(filename));
+#else
+    Log.info("Load:", filename);
+#endif
+
+    if (!std::filesystem::exists(filename)) {
         return false;
     }
 
-    json::value root = std::move(ret.value());
+    //std::string content = utils::load_file_without_bom(filename);
+
+    auto&& ret = json::open(filename, true);
+    if (!ret) {
+        m_last_error = "json pasing error, filename: " + filename;
+        return false;
+    }
+
+    const auto& root = ret.value();
 
     try {
         return parse(root);
@@ -23,5 +36,8 @@ bool asst::AbstractConfiger::load(const std::string& filename)
         m_last_error = std::string("json field error ") + e.what();
         return false;
     }
-    return true;
+    catch (std::exception& e) {
+        m_last_error = std::string("json field error ") + e.what();
+        return false;
+    }
 }

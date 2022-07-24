@@ -1,8 +1,6 @@
 {
-    "version": "0.9",
+    "version": "1.0",
     "options": {
-        "connectType": 0,
-        "connectType_Doc": "连接类型：0-连接电脑上的模拟器；1-连接自定义端口，请手动修改'emulator.Custom'中的相关字段。默认0",
         "taskDelay": 500,
         "taskDelay_Doc": "识别的延迟：越快识别频率越快，但会增加CPU消耗。单位毫秒，默认500",
         "controlDelayRange": [
@@ -15,243 +13,169 @@
         "adbExtraSwipeDuration": 1000,
         "adbExtraSwipeDuration_Doc": "额外的滑动持续时间：adb有bug，同样的参数，偶尔会划得非常远。额外做一个短程滑动，把之前的停下来。若小于0，则关闭额外滑动功能",
         "penguinReport": {
-            "Doc": "企鹅数据汇报：每次到结算界面，汇报掉落数据至企鹅数据 https://penguin-stats.cn/。true-开启，false-关闭，默认true",
-            "enable": true,
+            "Doc": "企鹅数据汇报: https://penguin-stats.cn/",
             "cmdFormat": "curl -H \"Content-Type: application/json\" -s -i -d \"[body]\" \"https://penguin-stats.cn/PenguinStats/api/v2/report\" [extra]",
             "cmdFormat_Doc": "命令格式，想打印详细信息可以尝试添加 -v -i"
+        },
+        "depotExportTemplate": {
+            "Doc": "仓库识别导出结果模板",
+            "arkPlanner": "{\"@type\": \"@penguin-statistics/depot\",\"items\": []}",
+            "arkPlanner_Doc": "https://penguin-stats.cn/planner"
         }
     },
-    "emulator_Doc": "下面的和模拟器窗口捕获逻辑有关，不需要修改",
-    "emulator": {
+    "intent": {
+        "Official": "com.hypergryph.arknights/com.u8.sdk.U8UnityContext",
+        "Bilibili": "com.hypergryph.arknights.bilibili/com.u8.sdk.SplashActivity",
+        "YoStarEN": "com.YoStarEN.Arknights/com.u8.sdk.U8UnityContext",
+        "YoStarJP": "com.YoStarJP.Arknights/com.u8.sdk.U8UnityContext",
+        "YoStarKR": "com.YoStarKR.Arknights/com.u8.sdk.U8UnityContext",
+        "txwy": "tw.txwy.and.arknights/com.u8.sdk.U8UnityContext"
+    },
+    "connection": {
+        "General": {
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] exec-out \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] exec-out screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
+        },
         "BlueStacks": {
-            "handle": {
-                "class": "BS2CHINAUI",
-                "window": "BlueStacks App Player"
-            },
-            "adb": {
-                "path": "[EmulatorPath]Engine\\ProgramFiles\\HD-Adb.exe",
-                "addresses": [
-                    "127.0.0.1:5555",
-                    "127.0.0.1:5556",
-                    "127.0.0.1:5557"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
-        },
-        "BlueStacksInternational": {
-            "handle": {
-                "class": "",
-                "window": "BlueStacks"
-            },
-            "adb": {
-                "path": "[EmulatorPath]HD-Adb.exe",
-                "addresses": [
-                    "127.0.0.1:5555",
-                    "127.0.0.1:5556",
-                    "127.0.0.1:5557"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
-        },
-        "BlueStacksInternationalNewVersion": {
-            "handle": {
-                "class": "",
-                "window": "BlueStacks App Player"
-            },
-            "adb": {
-                "path": "[EmulatorPath]HD-Adb.exe",
-                "addresses": [
-                    "127.0.0.1:5555",
-                    "127.0.0.1:5556",
-                    "127.0.0.1:5557"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] exec-out \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] exec-out screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
         "MuMuEmulator": {
-            "handle": {
-                "class": "Qt5QWindowIcon",
-                "window": "明日方舟 - MuMu模拟器"
-            },
-            "adb": {
-                "path": "[EmulatorPath]..\\vmonitor\\bin\\adb_server.exe",
-                "addresses": [
-                    "127.0.0.1:7555"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] exec-out \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] exec-out screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
         "LDPlayer": {
-            "handle": {
-                "class": "LDPlayerMainFrame",
-                "window": ""
-            },
-            "adb": {
-                "path": "[EmulatorPath]adb.exe",
-                "addresses": [
-                    "127.0.0.1:5555",
-                    "emulator-5554"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] shell \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] shell screencap -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] shell \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] shell \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] shell screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
         "Nox": {
-            "handle": {
-                "class": "Qt5QWindowIcon",
-                "window": "夜神模拟器"
-            },
-            "adb": {
-                "path": "[EmulatorPath]nox_adb.exe",
-                "addresses": [
-                    "127.0.0.1:62001",
-                    "127.0.0.1:59865"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
-        },
-        "NoxInternational": {
-            "handle": {
-                "class": "Qt5QWindowIcon",
-                "window": "NoxPlayer"
-            },
-            "adb": {
-                "path": "[EmulatorPath]nox_adb.exe",
-                "addresses": [
-                    "127.0.0.1:62001",
-                    "127.0.0.1:59865"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init= | awk ' { print $3 } '",
-                "displayFormat": "cur=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] exec-out \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] exec-out screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
         "XYAZ": {
-            "handle": {
-                "class": "Qt5QWindowIcon",
-                "window": "逍遥模拟器"
-            },
-            "adb": {
-                "path": "[EmulatorPath]adb.exe",
-                "addresses": [
-                    "127.0.0.1:21503"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init=",
-                "displayFormat": "    init=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] shell \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] shell screencap -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] shell \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] shell screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
         "WSA": {
-            "handle": {
-                "class": "com.hypergryph.arknights",
-                "window": "明日方舟"
-            },
-            "adb": {
-                "path": "[ExecDir]platform-tools\\adb.exe",
-                "addresses": [
-                    "127.0.0.1:58526"
-                ],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input -d [DisplayId] tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input -d [DisplayId] swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell \"wm size -d [DisplayId]\"",
-                "displayFormat": "Physical size:%dx%d",
-                "displayId": "[Adb] -s [Address] shell dumpsys display | grep mUniqueId=virtual:com.microsoft.windows.systemapp:com.hypergryph.arknights",
-                "screencapRawWithGzip": "[Adb] -s [Address] shell \"screencap -d [DisplayId] | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] shell screencap -d [DisplayId] -p",
-                "release": "[Adb] kill-server"
-            }
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "displayId": "[Adb] -s [AdbSerial] shell dumpsys display | grep mUniqueId=virtual:com.microsoft.windows.systemapp:com.hypergryph.arknights",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input -d [DisplayId] tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input -d [DisplayId] swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell \"wm size -d [DisplayId] | grep -o -E [0-9]+\"",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] shell \"screencap -d [DisplayId] | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] shell screencap -d [DisplayId] -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         },
-        "Custom": {
-            "handle": {
-                "class": "Custom Class",
-                "window": "Custom Window",
-                "Doc": "这俩不是用来捕获窗口的，是为了兼容现有的捕获模拟器的字段，随手写的，这两个字段实际不会使用到"
-            },
-            "adb": {
-                "Doc": "1.请将Adb解压到'path'中的路径（或者修改'path'）；2.请修改addresses为指定地址，若不填写，则使用devices自动查找",
-                "path": "[ExecDir]platform-tools\\adb.exe",
-                "addresses": [],
-                "devices": "[Adb] devices",
-                "addressRegex": "(.+)\tdevice",
-                "connect": "[Adb] connect [Address]",
-                "click": "[Adb] -s [Address] shell input tap [x] [y]",
-                "swipe": "[Adb] -s [Address] shell input swipe [x1] [y1] [x2] [y2] [duration]",
-                "display": "[Adb] -s [Address] shell dumpsys window displays | grep init=",
-                "displayFormat": "    init=%dx%d",
-                "screencapRawWithGzip": "[Adb] -s [Address] exec-out \"screencap | gzip -1\"",
-                "screencapEncode": "[Adb] -s [Address] exec-out screencap -p",
-                "release": "[Adb] kill-server"
-            }
+        "Compatible": {
+            "devices": "[Adb] devices",
+            "addressRegex": "(.+)\tdevice",
+            "connect": "[Adb] connect [AdbSerial]",
+            "uuid": "[Adb] -s [AdbSerial] shell settings get secure android_id",
+            "click": "[Adb] -s [AdbSerial] shell input tap [x] [y]",
+            "swipe": "[Adb] -s [AdbSerial] shell input swipe [x1] [y1] [x2] [y2] [duration]",
+            "display": "[Adb] -s [AdbSerial] shell dumpsys window displays | grep -o -E cur=+[^\\ ]+ | grep -o -E [0-9]+",
+            "displayFormat": "%d%d",
+            "screencapRawByNC": "[Adb] -s [AdbSerial] exec-out \"screencap | nc -w 3 [NcAddress] [NcPort]\"",
+            "ncAddress": "[Adb] -s [AdbSerial] shell \" cat /proc/net/arp | grep : \"",
+            "ncPort": 6723,
+            "screencapRawWithGzip": "[Adb] -s [AdbSerial] exec-out \"screencap | gzip -1\"",
+            "screencapEncode": "[Adb] -s [AdbSerial] exec-out screencap -p",
+            "release": "[Adb] kill-server",
+            "start": "[Adb] -s [AdbSerial] shell am start -n [Intent]",
+            "stop": "[Adb] -s [AdbSerial] shell \"am force-stop `dumpsys activity activities 2>/dev/null | grep Activities= 2>/dev/null | grep -m 1 -i -o -E [^\\ ]*arknights[^/]*`\""
         }
     }
 }

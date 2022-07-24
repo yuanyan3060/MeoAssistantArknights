@@ -6,7 +6,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "AsstDef.h"
+#include "AsstTypes.h"
 
 namespace asst
 {
@@ -49,6 +49,8 @@ namespace asst
 
     protected:
         virtual bool parse(const json::value& json) override;
+
+        void clear();
 
         std::unordered_set<std::string> m_all_tags;
         std::unordered_set<std::string> m_all_types;

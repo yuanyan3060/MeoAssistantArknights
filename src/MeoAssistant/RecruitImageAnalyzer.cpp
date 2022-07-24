@@ -22,8 +22,7 @@ bool asst::RecruitImageAnalyzer::tags_analyze()
     static bool analyzer_inited = false;
     static OcrImageAnalyzer tags_analyzer;
     if (!analyzer_inited) {
-        const auto tags_task_ptr = std::dynamic_pointer_cast<OcrTaskInfo>(
-            Task.get("RecruitTags"));
+        const auto tags_task_ptr = Task.get<OcrTaskInfo>("RecruitTags");
         tags_analyzer.set_roi(tags_task_ptr->roi);
         auto& all_tags_set = Resrc.recruit().get_all_tags();
         std::vector<std::string> all_tags_vec;
@@ -33,6 +32,7 @@ bool asst::RecruitImageAnalyzer::tags_analyze()
         if (ssr_iter != all_tags_vec.end()) {
             std::swap(*ssr_iter, all_tags_vec.front());
         }
+
         tags_analyzer.set_required(std::move(all_tags_vec));
         tags_analyzer.set_replace(tags_task_ptr->replace_map);
         analyzer_inited = true;
@@ -52,20 +52,22 @@ bool asst::RecruitImageAnalyzer::tags_analyze()
 
 bool asst::RecruitImageAnalyzer::time_analyze()
 {
-    const auto time_task_ptr = Task.get("RecruitTime");
+    const auto time_task_ptr = Task.get("RecruitCheckTimeUnreduced");
 
     MatchImageAnalyzer time_analyzer(m_image);
     time_analyzer.set_task_info(time_task_ptr);
+    // 这里检查时间是否没有调整过
+    if (!time_analyzer.analyze()) {
+        return false;
+    }
 
-    if (time_analyzer.analyze()) {
-        Rect rect = time_analyzer.get_result().rect;
-        const auto& res_move = time_task_ptr->rect_move;
-        if (!res_move.empty()) {
-            rect.x += res_move.x;
-            rect.y += res_move.y;
-            rect.width = res_move.width;
-            rect.height = res_move.height;
-        }
+    const auto set_time_task_ptr = Task.get("RecruitTimeReduce");
+
+    MatchImageAnalyzer set_time_analyzer(m_image);
+    set_time_analyzer.set_task_info(set_time_task_ptr);
+
+    if (set_time_analyzer.analyze()) {
+        Rect rect = set_time_analyzer.get_result().rect;
         m_set_time_rect.emplace_back(rect);
         return true;
     }
@@ -88,6 +90,7 @@ bool asst::RecruitImageAnalyzer::confirm_analyze()
 bool asst::RecruitImageAnalyzer::refresh_analyze()
 {
     MatchImageAnalyzer refresh_analyzer(m_image);
+
     refresh_analyzer.set_task_info("RecruitRefresh");
 
     if (refresh_analyzer.analyze()) {
