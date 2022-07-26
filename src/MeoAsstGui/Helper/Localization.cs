@@ -13,14 +13,42 @@ using System;
 using System.Windows;
 using System.Threading;
 using System.Globalization;
+using System.Collections.Generic;
 
 namespace MeoAsstGui
 {
     public class Localization
     {
+        public static readonly Dictionary<string, string> SupportedLanguages = new Dictionary<string, string> {
+            { "zh-cn", "简体中文" },
+            { "en-us", "English" }
+        };
+
+        public static string DefaultLanguage
+        {
+            get
+            {
+                var local = CultureInfo.CurrentCulture.Name.ToLower();
+                if (SupportedLanguages.ContainsKey(local))
+                {
+                    return local;
+                }
+                foreach (var lang in SupportedLanguages)
+                {
+                    var key = lang.Key.Contains("-") ? lang.Key.Split('-')[0] : lang.Key;
+                    if (local.StartsWith(key) || key.StartsWith(local))
+                    {
+                        return lang.Key;
+                    }
+                }
+                return "en-us";
+            }
+        }
+
+        private static readonly string culture = ViewStatusStorage.Get("GUI.Localization", DefaultLanguage);
+
         public static void Load()
         {
-            var culture = ViewStatusStorage.Get("GUI.Localization", "en-us");
             var cultureInfo = new CultureInfo(culture);
             Thread.CurrentThread.CurrentUICulture = cultureInfo;
             Thread.CurrentThread.CurrentCulture = cultureInfo;
@@ -34,7 +62,6 @@ namespace MeoAsstGui
 
         public static string GetString(string key)
         {
-            var culture = ViewStatusStorage.Get("GUI.Localization", "en-us");
             var dictionary = new ResourceDictionary
             {
                 Source = new Uri($@"Resources\Localizations\{culture}.xaml", UriKind.Relative)
