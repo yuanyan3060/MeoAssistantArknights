@@ -439,3 +439,7 @@ tools/**/*.png
 
 # Nuke
 .nuke/temp/*
+
+# Rust Target
+src/Rust/target/*
+!src/Rust/maa-sys/MeoAssistant.lib

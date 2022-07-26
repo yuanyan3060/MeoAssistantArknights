@@ -1,4 +1,5 @@
-use crate::{maa_sys::Maa, SERVER_VERSION};
+use maa_sys::Maa;
+use crate::SERVER_VERSION;
 use super::Error;
 use actix_web::{HttpResponse, Responder, web};
 use serde_json::json;

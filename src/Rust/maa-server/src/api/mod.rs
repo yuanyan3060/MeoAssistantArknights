@@ -1,7 +1,8 @@
 use std::{collections::HashMap, ffi::c_void};
 use actix_web::{web, HttpResponse, http::{StatusCode, header::ContentType}};
 use serde_json::json;
-use crate::{maa_sys::{Maa, self}, database};
+use maa_sys::Maa;
+use crate::database;
 mod instances;
 mod connect;
 mod message;
